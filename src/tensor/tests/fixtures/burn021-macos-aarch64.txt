@@ -1,0 +1,274 @@
+# burn 0.21 outputs, recorded once from burn itself on the Mac (aarch64-apple-darwin): the values the parity tests
+# compare bit for bit with the per-op results, taken from the burn side of each comparison
+# (Autodiff<NdArray<f32>>, and NdArray<f64>). Operations whose numerics were later changed to the
+# standard formulations are not recorded here; their gradients are checked against f64 and finite
+# differences (tests::standard).
+# key (test::label[#occurrence])	element type	count	sha256 of the little-endian bits
+tensor::tests::checks::softmax_of_nan_and_fully_masked_rows_is_burns::log_softmax with NaN / all −inf	f32	12	a699d58342a91070bdaeb51597f95a8728a3fb92c200d55dc94cf09c3daa4785
+tensor::tests::checks::softmax_of_nan_and_fully_masked_rows_is_burns::softmax with NaN / all −inf	f32	12	bd0e9e93c3e8820050a55fd999029db646adf15c7edff87186b423ae985c3990
+tensor::tests::f64ops::f64_ops_are_bit_equal_to_burn_f64::add_scalar	f64	130	cbe9c8a9adc29c2d425c260f055b10adbd6444714471aa97519b2a7e9b72ccdb
+tensor::tests::f64ops::f64_ops_are_bit_equal_to_burn_f64::exp	f64	130	1e94db9fe68f02fff769a397bf17548db02189b0e2d17391d1600b0c925ae4d6
+tensor::tests::f64ops::f64_ops_are_bit_equal_to_burn_f64::log	f64	130	49d1da5fca7ae93f5590cf01854ae3dcc00751bd76d959e79712d1ff7faffc99
+tensor::tests::f64ops::f64_ops_are_bit_equal_to_burn_f64::log_softmax	f64	130	934eb3edd7b1924449a0c2b3f72727493eaee084a744c77a6dc69f820d8d36d9
+tensor::tests::f64ops::f64_ops_are_bit_equal_to_burn_f64::matmul	f64	70	fb02c75bc45019de2627ea59d9de06ecff6f2a46aa32ea0caff1f121659ae294
+tensor::tests::f64ops::f64_ops_are_bit_equal_to_burn_f64::mean_dim1	f64	26	c4febbd04d14c4e9780ec15abd460c20d12f07317bb85e6144a472d8fbc4cf01
+tensor::tests::f64ops::f64_ops_are_bit_equal_to_burn_f64::mean_dim2	f64	10	c69f069160ad73bf5e7713cf7eec41541e52bb9064d90bdaa7af5b4afae6122a
+tensor::tests::f64ops::f64_ops_are_bit_equal_to_burn_f64::mul_scalar	f64	130	19c77c93a882e0421e1e07d82a202d6f1633c7dce42085119519d85adf9ceef8
+tensor::tests::f64ops::f64_ops_are_bit_equal_to_burn_f64::powf2	f64	130	93d789449767e3056265da87e6ba96c0842a55872dff4aa2d2504c5fdac45260
+tensor::tests::f64ops::f64_ops_are_bit_equal_to_burn_f64::recip	f64	130	082f1b8caf394c526103af888c4daafd2fe503b227d0127f565a726dedc6f452
+tensor::tests::f64ops::f64_ops_are_bit_equal_to_burn_f64::softmax	f64	130	6338c9252fb12f19453f4008adb78b418c488ea3f3708c2ac3509692f4fea7a3
+tensor::tests::f64ops::f64_ops_are_bit_equal_to_burn_f64::sqrt	f64	130	504dda0cac4e1899e58ea81ddb0b4b408462a453e5ef1b19f1191a3f9ab1531e
+tensor::tests::f64ops::f64_ops_are_bit_equal_to_burn_f64::sum_dim2	f64	10	9de56d8c8dae0c91245cd23e063c8bb7d5ddc74ca56c9e4b1100e05647cb8425
+tensor::tests::ops::activations::log_softmax 0 forward	f32	130	6311d8dc4f6a2b912bfad9499710d340443fe40771fb4ca36b12c92239f9ec4f
+tensor::tests::ops::activations::log_softmax 1 forward	f32	130	6645f5bbe8a7e638c5259d53e7f0c57f5c8bd6f1cdff376e318d09bf1d8ae304
+tensor::tests::ops::activations::log_softmax 2 forward	f32	130	e72b826815d09c3169f1798e237cd31a095f63660fef67bfef8e36659e746aa3
+tensor::tests::ops::activations::log_softmax large forward	f32	130	656dd127c959c31e646f065fb8d6d469f16225ceb7a9a45b6b13312f8df43d8a
+tensor::tests::ops::activations::softmax 0 forward	f32	130	2528e23854c1aa2e3e935e375f3bcdd277da2f71cfbb9e26c58d0ae200b0cfc4
+tensor::tests::ops::activations::softmax 1 forward	f32	130	add3dac325c1ffdc0ecdb76b9326499d1358a7934643cd305346df937d32e36c
+tensor::tests::ops::activations::softmax 2 forward	f32	130	04b4407c3083d69b2196ec6548d2ebb4aa5fdf504ef8e6e0ef99ea48584f90de
+tensor::tests::ops::binary_ops_with_broadcasting::add [1, 1, 1] forward	f32	130	e7718ec81aca4b13faa2e2c41e19800e1999b2fc052f73832a79768e49d1ce18
+tensor::tests::ops::binary_ops_with_broadcasting::add [1, 1, 1] gradient (lhs)	f32	130	5c3c329d35f0c164bf0e16edd0b328113aa387ec1df35343e33573e296010cf2
+tensor::tests::ops::binary_ops_with_broadcasting::add [1, 1, 1] gradient (rhs)	f32	1	f02b75f404f66d45ca0a53c12a5ade0760fcd9d7022a6a588b01da6ad8c62d64
+tensor::tests::ops::binary_ops_with_broadcasting::add [1, 5, 13] forward	f32	130	b6a117cf995cb9703ed4b1c5cc90e9b31c9bcb9136469e59b8be5546e37a7e06
+tensor::tests::ops::binary_ops_with_broadcasting::add [1, 5, 13] gradient (lhs)	f32	130	5c3c329d35f0c164bf0e16edd0b328113aa387ec1df35343e33573e296010cf2
+tensor::tests::ops::binary_ops_with_broadcasting::add [1, 5, 13] gradient (rhs)	f32	65	2559e0c5e7cd2d89d4c34218f3eb666a51c496f2ce6d225bbe428b6c49f8ef97
+tensor::tests::ops::binary_ops_with_broadcasting::add [2, 1, 13] forward	f32	130	a2d67f18429935db3e755fff179c4bf5cc28d382cb6ce5a2c07f8531ef7f1020
+tensor::tests::ops::binary_ops_with_broadcasting::add [2, 1, 13] gradient (lhs)	f32	130	5c3c329d35f0c164bf0e16edd0b328113aa387ec1df35343e33573e296010cf2
+tensor::tests::ops::binary_ops_with_broadcasting::add [2, 1, 13] gradient (rhs)	f32	26	08cbff6663c8ee1266db1e9e5386cd7ae5f82e4f02a299135f2a8a3e56663644
+tensor::tests::ops::binary_ops_with_broadcasting::add [2, 5, 1] forward	f32	130	1085a90a737eae5b5aea6c85944b553c6ff9c2d7a0ff7cd59b180cc2d0419173
+tensor::tests::ops::binary_ops_with_broadcasting::add [2, 5, 1] gradient (lhs)	f32	130	5c3c329d35f0c164bf0e16edd0b328113aa387ec1df35343e33573e296010cf2
+tensor::tests::ops::binary_ops_with_broadcasting::add [2, 5, 1] gradient (rhs)	f32	10	3a8a13727b526a70e7a91eec42fb31ca7f19a30e9213262b0bd44d989b553b66
+tensor::tests::ops::binary_ops_with_broadcasting::add forward	f32	130	4fc600a524c66b5c526105109fd33f8234a859cf1002903926696fdb82e0d1e8
+tensor::tests::ops::binary_ops_with_broadcasting::add gradient (lhs)	f32	130	5c3c329d35f0c164bf0e16edd0b328113aa387ec1df35343e33573e296010cf2
+tensor::tests::ops::binary_ops_with_broadcasting::add gradient (rhs)	f32	130	5c3c329d35f0c164bf0e16edd0b328113aa387ec1df35343e33573e296010cf2
+tensor::tests::ops::binary_ops_with_broadcasting::div [1, 1, 1] forward	f32	130	cbdc663f38320651254d3a8cfe5d2e357cdb5dac82a060a10075a5833d7ab942
+tensor::tests::ops::binary_ops_with_broadcasting::div [1, 5, 13] forward	f32	130	3d448d968326b94daf21714ee9c3f64ea921f1a2710c7d550bafda93b2c0645b
+tensor::tests::ops::binary_ops_with_broadcasting::div [2, 1, 13] forward	f32	130	6fc05a64d20d1e94341d76e7cb1a7c7cc7e40e1b505a84ef357198ef2502c863
+tensor::tests::ops::binary_ops_with_broadcasting::div [2, 5, 1] forward	f32	130	ab2ec5dabc927cd9f2f5a921f5406ab23c96cb4dffe88a173489cab4097f02c4
+tensor::tests::ops::binary_ops_with_broadcasting::div forward	f32	130	97ae0cca372a979a3bf26361622583a88d61cc11b72bfe087650775f00e97aaa
+tensor::tests::ops::binary_ops_with_broadcasting::mul [1, 1, 1] forward	f32	130	1f4b1aeb38bd55d283082d9488b5e983fe545593ac00c66d3c51a4b559e3c909
+tensor::tests::ops::binary_ops_with_broadcasting::mul [1, 1, 1] gradient (lhs)	f32	130	135c675f0e929e36b4e321c1c40a2bf5647b85e739ff63bd47eb81bb02cc2c07
+tensor::tests::ops::binary_ops_with_broadcasting::mul [1, 1, 1] gradient (rhs)	f32	1	3c897ee9768b5040cefdb90fe4544b8f589b0b8bb1d171723065609d600f78b7
+tensor::tests::ops::binary_ops_with_broadcasting::mul [1, 5, 13] forward	f32	130	1a3cc8c16a4fcd2e3f40051015bec33377e65e50530e62834bf1b3b52b88ce9f
+tensor::tests::ops::binary_ops_with_broadcasting::mul [1, 5, 13] gradient (lhs)	f32	130	08dbb4faeaf7602d1c03633cfe7a773a30058e7a00cab23b28fb610ca8a40639
+tensor::tests::ops::binary_ops_with_broadcasting::mul [1, 5, 13] gradient (rhs)	f32	65	65e7afd8cf8acf2f20cd83ba0f1860e8969df8eb4f19aa6c694ec1186e4305c3
+tensor::tests::ops::binary_ops_with_broadcasting::mul [2, 1, 13] forward	f32	130	2a1ba8c91b536b6cc3bdf916beacb222c61cad3ff033d550cc4d0dbb3237d83e
+tensor::tests::ops::binary_ops_with_broadcasting::mul [2, 1, 13] gradient (lhs)	f32	130	f4645f7ddbae40612408e2759f3ffef0020312f05dbf1ac1d237f6b28488eec2
+tensor::tests::ops::binary_ops_with_broadcasting::mul [2, 1, 13] gradient (rhs)	f32	26	3393fdb3b8449f1bb2bb61a1356e060410fcf4689a2b2ebb7a4be070f41d2110
+tensor::tests::ops::binary_ops_with_broadcasting::mul [2, 5, 1] forward	f32	130	1032ea48c27b02f622a7ec76639cf94899897f3b860e9c36eb3a86054c37385b
+tensor::tests::ops::binary_ops_with_broadcasting::mul [2, 5, 1] gradient (lhs)	f32	130	f7e010dfd9cf330bb7b4d7498a6cb4ff755e3f4fe66426f8ad813de6bc70cba5
+tensor::tests::ops::binary_ops_with_broadcasting::mul [2, 5, 1] gradient (rhs)	f32	10	7711407828b50d1ab8f27f0915c85564500c479c8a3fa568b98aeba1e88b36cb
+tensor::tests::ops::binary_ops_with_broadcasting::mul forward	f32	130	b43ca88e6cc6eafeafc3a48e782b48b26a36f31809ab64d4a49e8b3bb5b30c8d
+tensor::tests::ops::binary_ops_with_broadcasting::mul gradient (lhs)	f32	130	d8bfc94ad3275f7436e24b249be56e038b07560ea8de7ed81f50aeab10cb26a7
+tensor::tests::ops::binary_ops_with_broadcasting::mul gradient (rhs)	f32	130	9f9968d767706bfe7d1cee86c3d118107f36eafdd4b2c83d086993df4eae2553
+tensor::tests::ops::binary_ops_with_broadcasting::mul rev [1, 1, 1] forward	f32	130	1f4b1aeb38bd55d283082d9488b5e983fe545593ac00c66d3c51a4b559e3c909
+tensor::tests::ops::binary_ops_with_broadcasting::mul rev [1, 1, 1] gradient (lhs)	f32	1	3c897ee9768b5040cefdb90fe4544b8f589b0b8bb1d171723065609d600f78b7
+tensor::tests::ops::binary_ops_with_broadcasting::mul rev [1, 1, 1] gradient (rhs)	f32	130	135c675f0e929e36b4e321c1c40a2bf5647b85e739ff63bd47eb81bb02cc2c07
+tensor::tests::ops::binary_ops_with_broadcasting::mul rev [1, 5, 13] forward	f32	130	1a3cc8c16a4fcd2e3f40051015bec33377e65e50530e62834bf1b3b52b88ce9f
+tensor::tests::ops::binary_ops_with_broadcasting::mul rev [1, 5, 13] gradient (lhs)	f32	65	65e7afd8cf8acf2f20cd83ba0f1860e8969df8eb4f19aa6c694ec1186e4305c3
+tensor::tests::ops::binary_ops_with_broadcasting::mul rev [1, 5, 13] gradient (rhs)	f32	130	08dbb4faeaf7602d1c03633cfe7a773a30058e7a00cab23b28fb610ca8a40639
+tensor::tests::ops::binary_ops_with_broadcasting::mul rev [2, 1, 13] forward	f32	130	2a1ba8c91b536b6cc3bdf916beacb222c61cad3ff033d550cc4d0dbb3237d83e
+tensor::tests::ops::binary_ops_with_broadcasting::mul rev [2, 1, 13] gradient (lhs)	f32	26	3393fdb3b8449f1bb2bb61a1356e060410fcf4689a2b2ebb7a4be070f41d2110
+tensor::tests::ops::binary_ops_with_broadcasting::mul rev [2, 1, 13] gradient (rhs)	f32	130	f4645f7ddbae40612408e2759f3ffef0020312f05dbf1ac1d237f6b28488eec2
+tensor::tests::ops::binary_ops_with_broadcasting::mul rev [2, 5, 1] forward	f32	130	1032ea48c27b02f622a7ec76639cf94899897f3b860e9c36eb3a86054c37385b
+tensor::tests::ops::binary_ops_with_broadcasting::mul rev [2, 5, 1] gradient (lhs)	f32	10	7711407828b50d1ab8f27f0915c85564500c479c8a3fa568b98aeba1e88b36cb
+tensor::tests::ops::binary_ops_with_broadcasting::mul rev [2, 5, 1] gradient (rhs)	f32	130	f7e010dfd9cf330bb7b4d7498a6cb4ff755e3f4fe66426f8ad813de6bc70cba5
+tensor::tests::ops::binary_ops_with_broadcasting::sub [1, 1, 1] forward	f32	130	f19084354c6cb8bdb1709025bda6e590337ee769f5bb17c2b62c1d19c45200d1
+tensor::tests::ops::binary_ops_with_broadcasting::sub [1, 1, 1] gradient (lhs)	f32	130	5c3c329d35f0c164bf0e16edd0b328113aa387ec1df35343e33573e296010cf2
+tensor::tests::ops::binary_ops_with_broadcasting::sub [1, 1, 1] gradient (rhs)	f32	1	977a5f520c2a3b4aa2d727f1ba913fee7fde7787fecb5a244a742ae35c688b3b
+tensor::tests::ops::binary_ops_with_broadcasting::sub [1, 5, 13] forward	f32	130	1be555cdd633d5ad5edb1cf5ec74f679abc2368b6c5c1f2b3081e00a3eebccba
+tensor::tests::ops::binary_ops_with_broadcasting::sub [1, 5, 13] gradient (lhs)	f32	130	5c3c329d35f0c164bf0e16edd0b328113aa387ec1df35343e33573e296010cf2
+tensor::tests::ops::binary_ops_with_broadcasting::sub [1, 5, 13] gradient (rhs)	f32	65	19881576a1bd77015c031b5d7f225ef2e59c75388e7d7106e7ac7ed0f73252e3
+tensor::tests::ops::binary_ops_with_broadcasting::sub [2, 1, 13] forward	f32	130	c36291511ce3c3405d73d84a967e95ef1e1413b6b6a54bc8ffda53648950a814
+tensor::tests::ops::binary_ops_with_broadcasting::sub [2, 1, 13] gradient (lhs)	f32	130	5c3c329d35f0c164bf0e16edd0b328113aa387ec1df35343e33573e296010cf2
+tensor::tests::ops::binary_ops_with_broadcasting::sub [2, 1, 13] gradient (rhs)	f32	26	24e24db3f5a0786e04be0f7f139dfd7eee00d64c486c3ab7352261e4a51202bc
+tensor::tests::ops::binary_ops_with_broadcasting::sub [2, 5, 1] forward	f32	130	9c11dcd66b15a07ba7c102492c1bef232e53a141afbee3984d56069b8c9b3a48
+tensor::tests::ops::binary_ops_with_broadcasting::sub [2, 5, 1] gradient (lhs)	f32	130	5c3c329d35f0c164bf0e16edd0b328113aa387ec1df35343e33573e296010cf2
+tensor::tests::ops::binary_ops_with_broadcasting::sub [2, 5, 1] gradient (rhs)	f32	10	fcd5f1b7fca86613776291285a644b66474c71a0b8bc7ba849ea7807b5f84f19
+tensor::tests::ops::binary_ops_with_broadcasting::sub forward	f32	130	47c1740634b0d6093cb02d6977bf2c067afcaad65879002165c047831b00bbb4
+tensor::tests::ops::binary_ops_with_broadcasting::sub gradient (lhs)	f32	130	5c3c329d35f0c164bf0e16edd0b328113aa387ec1df35343e33573e296010cf2
+tensor::tests::ops::binary_ops_with_broadcasting::sub gradient (rhs)	f32	130	0b8c1c1ebb60e1f7066541f383498405ed8aeca96a2fcd8e7acb0de7daec20c2
+tensor::tests::ops::detach_and_masked_stop_gradient::masked forward	f32	130	58b8c57dcaa5f10fe26e457a645a319d45b7b39783634afd9bbd4ab373e376af
+tensor::tests::ops::detach_and_masked_stop_gradient::masked gradient	f32	130	48d92c307f49c596b628401bbc96347354ff2b37c3fdfc3909bf8fd17acb50a7
+tensor::tests::ops::indexing_ops::gather dim 1 forward	f32	234	0b86c875148e383d748fa4b4e265a7466fc2a82326e8cd821207da513fc53d6b
+tensor::tests::ops::indexing_ops::gather dim 1 gradient	f32	130	c0a3dcf57e99a3b2ab755fa7c0b8289c1a77d49faf70250f8fdde3ee9b84af23
+tensor::tests::ops::indexing_ops::gather dim 2 forward	f32	40	a0fa1960d2d075a6ad98d284b3e830408fe75090bca4ee9676248617b4158010
+tensor::tests::ops::indexing_ops::gather dim 2 gradient	f32	130	95b2f6f645f0cbed826c968717bef56eb52b13d56c6325f3ad0f998bab7a599c
+tensor::tests::ops::indexing_ops::mask_fill causal + softmax forward	f32	676	fec6208f67f29c621c997e3f30c58720030e10db67d1998453384c1322c43f9f
+tensor::tests::ops::indexing_ops::select forward	f32	40	4aa7819e2b2c354e36d72db5a000338de0523e9f0a0f01a6096965c250e108c0
+tensor::tests::ops::indexing_ops::select gradient	f32	130	1daa823e9cb06b329dabddf602c6410d36999d14c5623cfdc323db2cc1bdcea7
+tensor::tests::ops::indexing_ops::topk 1 gradient forward	f32	12	406df90bc540054fa5be153fe712c9ce642555c909cd3ba2e12d04d60f6e24bd
+tensor::tests::ops::indexing_ops::topk 1 gradient gradient	f32	192	dfe53a18d2402089fb3016f45fb7fd2f384649dc775f218604e62047894c6809
+tensor::tests::ops::indexing_ops::topk 1 indices	i64	12	965c75797eeafb0c96b3a4c66631c33f6909e82cc65a3a2d88a81345abbd49d1
+tensor::tests::ops::indexing_ops::topk 1 values	f32	12	406df90bc540054fa5be153fe712c9ce642555c909cd3ba2e12d04d60f6e24bd
+tensor::tests::ops::indexing_ops::topk 16 gradient forward	f32	192	0194cf052aa246bd478934ccb360b770d3acf98b27ae20b1fb5b1bec36947cb3
+tensor::tests::ops::indexing_ops::topk 16 gradient gradient	f32	192	76d2cbf6502b85fcbf64cc22288bb9e51f4e3830078d7f84d3d9235ec5ed006f
+tensor::tests::ops::indexing_ops::topk 16 indices	i64	192	d851370db844d7a32145c63df2f22bc166f0dc52286a8cd29f239aa392877d85
+tensor::tests::ops::indexing_ops::topk 16 values	f32	192	0194cf052aa246bd478934ccb360b770d3acf98b27ae20b1fb5b1bec36947cb3
+tensor::tests::ops::indexing_ops::topk 4 gradient forward	f32	48	6ec708f765d6143177e2621c0d1f6564ffd76d2fc924307e4496468881d91083
+tensor::tests::ops::indexing_ops::topk 4 gradient gradient	f32	192	266f6fda5e46e4192595596b97eb743c35acb8b68b7d303f6e326c33bbba9ba1
+tensor::tests::ops::indexing_ops::topk 4 indices	i64	48	9202e7ccc4820d16d591fd204be42239829e99b1aef0d0cbe1047110d6fa33a2
+tensor::tests::ops::indexing_ops::topk 4 values	f32	48	6ec708f765d6143177e2621c0d1f6564ffd76d2fc924307e4496468881d91083
+tensor::tests::ops::indexing_ops::tril_mask	bool	25	4d3fceb678139ba49b9a269c64986128d6110074e94067818f8d58989ee2f2a3
+tensor::tests::ops::int_ops::greater_equal_elem	f32	42	f0076bf31082a1fe65b72bb580d6174b12d248ea0049768e774aa2aeff50ecac
+tensor::tests::ops::int_ops::int add	i64	42	d828771b6d89d817795563ef70ff21537aa2e296cc72cfcb21269bc19c4c0be8
+tensor::tests::ops::int_ops::int cat	i64	48	ebf7fde66fbf24dfc00035671b64cf9c72f3d612bd90bbb6ee007544d985f8f5
+tensor::tests::ops::int_ops::int div_scalar	i64	42	4b0c0b20f583d763db8ff198ea76af53173b9744c53d343300a547b132c716b3
+tensor::tests::ops::int_ops::int gather	i64	24	6c93c10befbbf95355c77820893fa55052603aec92107ea73a44a566dec02bb7
+tensor::tests::ops::int_ops::int mul_scalar	i64	42	f34c9c3fe8c51d172cb033dc74ed5a3e0d2f39343ee7810768f3ee34064cc9c6
+tensor::tests::ops::int_ops::int remainder_scalar	i64	42	e4cacdd9fbecbbf207e52f6c8cc7b9d45385c57e433990c12d7e698b472f6725
+tensor::tests::ops::int_ops::int unsqueeze+expand	i64	210	57bf388dcbca33e881ab8ab9aab22c051e749b23b00528777b79f359fabb57bc
+tensor::tests::ops::int_ops::not_equal_elem	f32	42	d34088328a381072e1a7acc1e1d8d2638ce86bc6035adfec2dda73e58e9deb23
+tensor::tests::ops::int_ops::one_hot	f32	1680	2c55aa34ee4dd323e98e58d7db3060f6a0c9047140b2da2ca52e9761f792916e
+tensor::tests::ops::layout_ops::cat dim 1 forward	f32	312	ff7164a9db59fa9ff03134af34abdce94fbfd6345b9db6cb7853b1f69a885b82
+tensor::tests::ops::layout_ops::cat dim 1 gradient (lhs)	f32	130	8822befde6c6e01750f02a093398f3cd265e2144e719011ce3b406659d30e742
+tensor::tests::ops::layout_ops::cat dim 1 gradient (rhs)	f32	52	c5d38c488228813779e6f107e8e5fb82263133bcfae2e096f55b3c9491d27d93
+tensor::tests::ops::layout_ops::cat forward	f32	160	9c6f3e64b3fe6c9c1c1deaefd9ac767f396dba7300fd66177ada7cbaf6ed14d6
+tensor::tests::ops::layout_ops::cat gradient (lhs)	f32	130	a4330bae303a0554850e82fcc7c0a511951643b595ddfa0762617c8bf7035bed
+tensor::tests::ops::layout_ops::cat gradient (rhs)	f32	30	b496b068b7d186b07dedd91125d3dcd9a152114c29794e7119fb39d6b36ad2e8
+tensor::tests::ops::layout_ops::expand forward	f32	130	277db3010a33ec20c9dfcb94b8cc2905f5673b6085d876fa43f2087e9c3a4315
+tensor::tests::ops::layout_ops::expand gradient	f32	26	4e9ad6945c0835f1d790b6f5f83073dfca3f8339e5ae351dad29f4b220f36bf3
+tensor::tests::ops::layout_ops::reshape forward	f32	130	c72fc6325dd3f8425ccfa5ca334a13d84f8578b51c9a1381d0063e21e7bef57e
+tensor::tests::ops::layout_ops::reshape gradient	f32	130	3756c42212557962d65f990fc354b45a635990d2baf06f882b4ef7b374845d68
+tensor::tests::ops::layout_ops::slice forward	f32	60	41faa9f6e9742da8f2be3447a28eae82347e5389312f58ab431bbfd27c13dc73
+tensor::tests::ops::layout_ops::slice gradient	f32	130	56a7f3d93a0df3821caaabddc666737522396933122468c495d894825a43d586
+tensor::tests::ops::layout_ops::slice_assign forward	f32	130	386ffaa3abaddb140811a9a74e66e32577f01ad7c50b046fc9d2daf7c74a3fee
+tensor::tests::ops::layout_ops::slice_assign gradient (lhs)	f32	130	08e385006291c293ff77d5e9cdf36b3f5101350cca2645f00346b91911e76f41
+tensor::tests::ops::layout_ops::slice_assign gradient (rhs)	f32	24	02d98590b2eb5d7b408cac8cd224b72a3170cc24f8a13b1ad033e95550fdc756
+tensor::tests::ops::layout_ops::swap_dims 0 2 forward	f32	130	07c33f2345a9f0fd2ff9f0b7595805c3ded7b84168deeee87520b05c9fdbebf4
+tensor::tests::ops::layout_ops::swap_dims 0 2 gradient	f32	130	a5486a707c8a34f1bfa1f4c1171debec56475101b99efc7b9fcfe51f500d9acd
+tensor::tests::ops::layout_ops::swap_dims forward	f32	130	cc07cc2f046b229abb58908ef3c73f407c551d73c7f01fe3f13d3662aebb9d0d
+tensor::tests::ops::layout_ops::swap_dims gradient	f32	130	ae4d7c03b1ba0ae89a1b5e490632590d418b2a0698574af6e9f3e294a9a7dee1
+tensor::tests::ops::layout_ops::unsqueeze+expand forward	f32	390	e1e226cede7ba5fce16fc8aca416ef99128504fba3b1e8bb0a92b9db55306c9d
+tensor::tests::ops::layout_ops::unsqueeze+expand gradient	f32	130	e43536ca79b08d2c4bc683a6628914578473c291819bad595421b92ad978e707
+tensor::tests::ops::matmul::matmul [b,1,k]×[1,k,n] rule forward	f32	40	0d07a7867945edd41ce09828af946c7283ef526b37ef40b433b2a1c2e93ad560
+tensor::tests::ops::matmul::matmul broadcast batch forward	f32	693	9edfec5772324a16d06a9f706ee72ecda1f9b4f8922a9d7378772dd68245c5e9
+tensor::tests::ops::matmul::matmul broadcast batch gradient (lhs)	f32	1344	bdf84f77336d3d8b530589d7f4871322daae3cec5a9cbe1eb26f75669b0d4a2f
+tensor::tests::ops::matmul::matmul broadcast batch gradient (rhs)	f32	2112	222347e0ace3446fcba177f43a149c01c6bce083bee510b6b753efb99b997f71
+tensor::tests::ops::matmul::matmul rank 3 forward	f32	693	5520ea8f0fc85394ee4c3b8c882de46150f35566e4933d166f8dc6b8692788c1
+tensor::tests::ops::matmul::matmul rank 3 gradient (lhs)	f32	1344	f1163cf75f6605a3b20af3c96bbec035efee139b75a5686a0dc8f6cb5933625d
+tensor::tests::ops::matmul::matmul rank 3 gradient (rhs)	f32	6336	67785b6b0440ec47b44dcfa195f0f2df670ea5d6c2b02949f1f3ee5f6a553899
+tensor::tests::ops::matmul::matmul rank 4, k > block forward	f32	120	da245be4b5c9a995be2eace06af580bb3f15a2feb585846b85cce6b71837f44d
+tensor::tests::ops::matmul::matmul rank 4, k > block gradient (lhs)	f32	9000	ae09e5d020ce42addfc0627ee641d6942f5622e78e8f39ada40a8a814779cfc9
+tensor::tests::ops::matmul::matmul rank 4, k > block gradient (rhs)	f32	7200	3a0bf17c4c87041a4803850012e152ce5045dfcf0f5fae042ed7059471473065
+tensor::tests::ops::matmul::matmul transposed rhs forward	f32	693	79850bc7d459e8a3181ccc71791bc4033ab8021bada96ce5905a79f14ec5d9f6
+tensor::tests::ops::matmul::matmul transposed rhs gradient (lhs)	f32	1344	377f75905dbf10e26940824bf69781b0b681985d7e7c80a855fb870a811013d1
+tensor::tests::ops::matmul::matmul transposed rhs gradient (rhs)	f32	6336	f6d6c292eeb859920e191805df8a472e27923ab3ffe7c63fee7b7507760f8501
+tensor::tests::ops::reductions::argmax 0 [1, 9, 8]	i64	72	1a0295f4bf5986c5f74eca9153a6a4cb10b073a01a76ba4a457fd862c78966a4
+tensor::tests::ops::reductions::argmax 0 [2, 5, 13]	i64	65	3836482101c99c9cdb1f754657ffe1005242d869c793d9873e0fa31bca42adb7
+tensor::tests::ops::reductions::argmax 0 [3, 1, 40]	i64	40	3c5cee2f06a058f13dbb27c8c6deaabe32f9a6b8fb64b946d588a8070794fbc4
+tensor::tests::ops::reductions::argmax 0 [4, 17, 1]	i64	17	1975f7b80fce0441cec5007549ee79d202d0b3ae2e8ca14fdae06663be0ff8a2
+tensor::tests::ops::reductions::argmax 1 [1, 9, 8]	i64	8	b4b1f20a76b1fd7d5ff81a7c870eedfdab30e337ee8a9c04e858341ecaa502bc
+tensor::tests::ops::reductions::argmax 1 [2, 5, 13]	i64	26	e4f5fd0d11bb77750bcc13d798eef88c6d6cee5a0522c098dd623100c8976106
+tensor::tests::ops::reductions::argmax 1 [3, 1, 40]	i64	120	3dc463a76fc170607c07b104c3cb531362ce7d6e10c1a34e0c0f370aeae08ce8
+tensor::tests::ops::reductions::argmax 1 [4, 17, 1]	i64	4	92af60ae702f48a2dac446145abba92d868e3783820f85d76d53f24f82542c7a
+tensor::tests::ops::reductions::argmax 2 [1, 9, 8]	i64	9	784494201d62b50e809752507260b43601a50f227f5acdb8b69ad52f1a733554
+tensor::tests::ops::reductions::argmax 2 [2, 5, 13]	i64	10	5ce4e077a0fce251e392950fa4182de5684865994963f7b45f485ca7e15393f7
+tensor::tests::ops::reductions::argmax 2 [3, 1, 40]	i64	3	94f8eb76c6bbc6d00af2bac006f653a0ba2e1dfafe172d4cdae59c9c0f002393
+tensor::tests::ops::reductions::argmax 2 [4, 17, 1]	i64	68	44ddd2f478477ebd1c1cd5b99400af48cd46033c59173195f48870e608cec810
+tensor::tests::ops::reductions::argmax ties	i64	2	4cbbd8ca5215b8d161aec181a74b694f4e24b001d5b081dc0030ed797a8973e0
+tensor::tests::ops::reductions::max_dim 0 [1, 9, 8] forward	f32	72	524c277e8b442986d2a9dce892c469d831c9b0d9cdfd27838529afd63d871f38
+tensor::tests::ops::reductions::max_dim 0 [1, 9, 8] gradient	f32	72	e2a0516b47c8983507efe1e8d65405d0ac223025d168f23c6f7b44b7fb075029
+tensor::tests::ops::reductions::max_dim 0 [2, 5, 13] forward	f32	65	a9732802eec4351f791356e00e054c6ba4bb3ace6b2cd49b926a2f02062ec87c
+tensor::tests::ops::reductions::max_dim 0 [2, 5, 13] gradient	f32	130	0e4ea086d26655c75db6f5afb2a5c41f916464c435c8d9da747be7498f533fb5
+tensor::tests::ops::reductions::max_dim 0 [3, 1, 40] forward	f32	40	91e2757fc99f3799a3ea6580f2206966eb17ba601d933e785d9d31150486a008
+tensor::tests::ops::reductions::max_dim 0 [3, 1, 40] gradient	f32	120	831f7d99d7db2b83df3cc749cf873dc7229f5d6094547c4bf49c7426ebda85d7
+tensor::tests::ops::reductions::max_dim 0 [4, 17, 1] forward	f32	17	bf7263c8cc55f7796371d3c6268596f517a44f8596364d5c269cbd17e2e146c8
+tensor::tests::ops::reductions::max_dim 0 [4, 17, 1] gradient	f32	68	e9d9405f9f1013dbebc4f8df5c820c6de123f0937a3829287c698ac3fa7f385a
+tensor::tests::ops::reductions::max_dim 1 [1, 9, 8] forward	f32	8	36fb383d63211d5f1d19c99653c9437fcb3be147407dfa7ac1d8b594dda7110c
+tensor::tests::ops::reductions::max_dim 1 [1, 9, 8] gradient	f32	72	f99882617821eb68cb3cbbbd9d8ade7324c53f2ca5bab602e0b44613b3d13bd2
+tensor::tests::ops::reductions::max_dim 1 [2, 5, 13] forward	f32	26	9bdedb27c81427c4a2d12b76b2edfe4f994b6dc12fe8e57d7d9a56fcd87be343
+tensor::tests::ops::reductions::max_dim 1 [2, 5, 13] gradient	f32	130	5497454b995481c1e31d21f334ddd088eaa2476d151f61fefcaef0e95f332ebe
+tensor::tests::ops::reductions::max_dim 1 [3, 1, 40] forward	f32	120	1012067137acdbc563c91a08087c86e3456b3548d9fc7b3b58bb4ec2f50bb0a4
+tensor::tests::ops::reductions::max_dim 1 [3, 1, 40] gradient	f32	120	3e54c7f823d810c830cef7cf1eab60c06d0f219ebb2b29dede1a45c56506bdb2
+tensor::tests::ops::reductions::max_dim 1 [4, 17, 1] forward	f32	4	1e0908221cfadd15b45b72ea1c8116d2d75a7a8a683e54cfebb2930f84ccae1c
+tensor::tests::ops::reductions::max_dim 1 [4, 17, 1] gradient	f32	68	a7aac0118dc6fa6f5ae1aaf08ce317c8539005b3a21cfc4f5a25639e4ee89fae
+tensor::tests::ops::reductions::max_dim 2 [1, 9, 8] forward	f32	9	9c7c3ccdb897f26e429d125e69e2e7e1c7d7579108df65dd1b3bf4aa6d1c9ec0
+tensor::tests::ops::reductions::max_dim 2 [1, 9, 8] gradient	f32	72	e45978fa4534dae4a4170896a08f6e3e22c08d64d3bc690ba135d8e32872dfdb
+tensor::tests::ops::reductions::max_dim 2 [2, 5, 13] forward	f32	10	d610687d0ddcba5845c04eba947541d14ee9f8f205d5ce7011ee4f1f32e98274
+tensor::tests::ops::reductions::max_dim 2 [2, 5, 13] gradient	f32	130	7937b353f5aa33d9f96021a6b875bd298b9452da21a71c239866afdbba041ac0
+tensor::tests::ops::reductions::max_dim 2 [3, 1, 40] forward	f32	3	6a836056cd8caefbfa3d87599691f42c48af293a9dd2c4afccb3368c431ab4a9
+tensor::tests::ops::reductions::max_dim 2 [3, 1, 40] gradient	f32	120	5179f146eb586c072915a978b3f172caf19d5f9f43dbe7567d563fafc9f3817c
+tensor::tests::ops::reductions::max_dim 2 [4, 17, 1] forward	f32	68	198ec2a39c0910f6fe5b35ff5a5d8a8883a6b99629b71091691e7331ba279016
+tensor::tests::ops::reductions::max_dim 2 [4, 17, 1] gradient	f32	68	c055bef9355bd2186abf691b25cacc9e1ae877508165eeb462b341d509a80b7b
+tensor::tests::ops::reductions::mean forward	f32	1	8e196ac7d5f3f90f2815e7ea9e8784354655ebca0d40574a003475a0deebfea8
+tensor::tests::ops::reductions::mean forward#2	f32	1	2726edaf647491d36e174008ffd6d8375a047e1751a93e9b29f6e00d2a6032e4
+tensor::tests::ops::reductions::mean forward#3	f32	1	e2ca0bbf8c1d03c7d09acb1efc8b8c5022432c6bfb4c37ef1a113dcb9f08e3f7
+tensor::tests::ops::reductions::mean forward#4	f32	1	0a938bf8b71fa6e1ecf0840825a72fad56426f3b8f170c6d533be7a97cc75b2f
+tensor::tests::ops::reductions::mean_dim 0 [1, 9, 8] forward	f32	72	524c277e8b442986d2a9dce892c469d831c9b0d9cdfd27838529afd63d871f38
+tensor::tests::ops::reductions::mean_dim 0 [2, 5, 13] forward	f32	65	6f9031690efdc3bc50875761a466e2d32675991e4d857028e91d7d2dc0808c18
+tensor::tests::ops::reductions::mean_dim 0 [3, 1, 40] forward	f32	40	ede118bafc3309bd5466fa101346bfc3d825bd58fdf60913f214e09bc5f9b004
+tensor::tests::ops::reductions::mean_dim 0 [4, 17, 1] forward	f32	17	f3675e404ed8068a953c95845b82dd75dada991d3680c0f2a9dd6af3a4f9df27
+tensor::tests::ops::reductions::mean_dim 1 [1, 9, 8] forward	f32	8	2a37fb33ffefbba1eabf6f5ea4bc05c114a9d7c9a54dc4d1d04b19fdd624b22c
+tensor::tests::ops::reductions::mean_dim 1 [2, 5, 13] forward	f32	26	d00cf69406d12b2941494aa0090e5326f40bc947c17243de7d68dcb1fa2eb50a
+tensor::tests::ops::reductions::mean_dim 1 [3, 1, 40] forward	f32	120	1012067137acdbc563c91a08087c86e3456b3548d9fc7b3b58bb4ec2f50bb0a4
+tensor::tests::ops::reductions::mean_dim 1 [4, 17, 1] forward	f32	4	22fcea247909b8417c072b1212d5259fcfceabc494b2aa4e044d9c5f3fbae781
+tensor::tests::ops::reductions::mean_dim 2 [1, 9, 8] forward	f32	9	08f12baad3fdd8068835413c596221f941584e542d928c5c43c7ba09d2a514d9
+tensor::tests::ops::reductions::mean_dim 2 [2, 5, 13] forward	f32	10	cbdeb7d3d6d8f087e2fe3a5d3f642f81f419172f66b7d8d357d53359fc346e45
+tensor::tests::ops::reductions::mean_dim 2 [3, 1, 40] forward	f32	3	b3caf507ab30d6b3e3b5acf6c09870ebd39a65fd7e916297056d6ee1df78fcd0
+tensor::tests::ops::reductions::mean_dim 2 [4, 17, 1] forward	f32	68	198ec2a39c0910f6fe5b35ff5a5d8a8883a6b99629b71091691e7331ba279016
+tensor::tests::ops::reductions::sum forward	f32	1	9df320c0b74dd01cca3370149d64646b580909d53cbb521ced1cbae3872e3811
+tensor::tests::ops::reductions::sum forward#2	f32	1	be1496dab9b81d5bad00ef28d9d5f2c0250ff61ca7ec2e1f3fa69ac129eb4f7c
+tensor::tests::ops::reductions::sum forward#3	f32	1	b104ed35bd00150200529948414c0ee58840e35d6aee7adb615ccd84c8db43c6
+tensor::tests::ops::reductions::sum forward#4	f32	1	17f9a5677285062c0d243949383c8a21dd520d744367c3f1d8bce88e1488213f
+tensor::tests::ops::reductions::sum gradient	f32	130	0c41ba1a3c967d27029dd2c877493cbe1b78cfe4420ff849ec8e5a5b5afd409c
+tensor::tests::ops::reductions::sum gradient#2	f32	120	f44e3491c15a70255f8ca6633a0383273dbf25b6e407a765e30b6f6b05e45501
+tensor::tests::ops::reductions::sum gradient#3	f32	68	84af211db9cb82042276e3cfaea7e8356446e29fc1f09f943846eef34fb5d74c
+tensor::tests::ops::reductions::sum gradient#4	f32	72	73f04f54f35483030bb0a9e1088d5a56eedbe4d941ce08a45727a162ade2753f
+tensor::tests::ops::reductions::sum long forward	f32	1	6de541a99c17bda6a9a52100aafc6d0c115fdcbfabcbe85f3989f4b615d7130e
+tensor::tests::ops::reductions::sum long gradient	f32	3003	e2fceda44d9863a9ecd7ce61e0b9827d7e47eab3f7967d2d87d8ffcd2ad07a58
+tensor::tests::ops::reductions::sum_dim 0 [1, 9, 8] forward	f32	72	524c277e8b442986d2a9dce892c469d831c9b0d9cdfd27838529afd63d871f38
+tensor::tests::ops::reductions::sum_dim 0 [1, 9, 8] gradient	f32	72	e2a0516b47c8983507efe1e8d65405d0ac223025d168f23c6f7b44b7fb075029
+tensor::tests::ops::reductions::sum_dim 0 [2, 5, 13] forward	f32	65	e323bff4e60f3057428498b4ffae6f3402fa0c33837fbb94718fe665e66ffd8e
+tensor::tests::ops::reductions::sum_dim 0 [2, 5, 13] gradient	f32	130	84c1e5997531db92134ea054b531bc0f25f0c6734db34c7f8493c6dce03ef2ff
+tensor::tests::ops::reductions::sum_dim 0 [3, 1, 40] forward	f32	40	07b012d572b7a6af0bc182bb62d77fdcd8f1f9f71733e6e8d89f9cf831f14e50
+tensor::tests::ops::reductions::sum_dim 0 [3, 1, 40] gradient	f32	120	c440d4ec4d3d6630144b7471c10987bf8873ebc389e7384043383cc00a10c923
+tensor::tests::ops::reductions::sum_dim 0 [4, 17, 1] forward	f32	17	ff966bb955ca66907f4a7e61f1a1e15a1297c9841cca4e183ffbf799216c7db3
+tensor::tests::ops::reductions::sum_dim 0 [4, 17, 1] gradient	f32	68	cf9ec5e7bfb7872a42b1758e88000df1a2d5478fd67669a166929fce3a760f33
+tensor::tests::ops::reductions::sum_dim 1 [1, 9, 8] forward	f32	8	a18ea7073aab0305f5461a3c7e20821473080353c7bfb1361243de50506bb010
+tensor::tests::ops::reductions::sum_dim 1 [1, 9, 8] gradient	f32	72	7dd101fdc576b783e8a2d54d823bca02b7a5725c1ed26d0aa1276afd6794d257
+tensor::tests::ops::reductions::sum_dim 1 [2, 5, 13] forward	f32	26	e163d589890594f1493958a16cbd096844e96c1fa5510c6e85f75324a609cbfb
+tensor::tests::ops::reductions::sum_dim 1 [2, 5, 13] gradient	f32	130	716b3998fa6729f4d42f9aef19dae149b3ce3994e3d1384afeab759344c94aa5
+tensor::tests::ops::reductions::sum_dim 1 [3, 1, 40] forward	f32	120	1012067137acdbc563c91a08087c86e3456b3548d9fc7b3b58bb4ec2f50bb0a4
+tensor::tests::ops::reductions::sum_dim 1 [3, 1, 40] gradient	f32	120	3e54c7f823d810c830cef7cf1eab60c06d0f219ebb2b29dede1a45c56506bdb2
+tensor::tests::ops::reductions::sum_dim 1 [4, 17, 1] forward	f32	4	a861dfba8c42c5d983e420915ff12eb071ee6af40e4af48b23c87c32a996fc05
+tensor::tests::ops::reductions::sum_dim 1 [4, 17, 1] gradient	f32	68	2c858478d0684b2a1946bee31d2a4d799178d54254a8d483625e6b92e40ca9fd
+tensor::tests::ops::reductions::sum_dim 2 [1, 9, 8] forward	f32	9	a02e99fbe9269c0d1a3fb259beb0022b52504a30ba0de78b6b746ea21b5c15af
+tensor::tests::ops::reductions::sum_dim 2 [1, 9, 8] gradient	f32	72	148c758b5ccc5b08d88dc820b6ab9a67a99e057325065ef9605cc2b1629758ab
+tensor::tests::ops::reductions::sum_dim 2 [2, 5, 13] forward	f32	10	f9af070fdb98182a0550fa7064ac32db162d366a636072321e6e42d1884e7f02
+tensor::tests::ops::reductions::sum_dim 2 [2, 5, 13] gradient	f32	130	b90ebf2cf654acc5d26a5a3600bb74e6a7a359f1b4e44e64d79226fb0d72e508
+tensor::tests::ops::reductions::sum_dim 2 [3, 1, 40] forward	f32	3	7fff715766d94c724765444c08c184faf67029b7cd5c446228015c7e989a5c31
+tensor::tests::ops::reductions::sum_dim 2 [3, 1, 40] gradient	f32	120	7d74dfb15a83aa4f3755d44dc32dbb5bf1f907993bf9093bae13e0c460a39af1
+tensor::tests::ops::reductions::sum_dim 2 [4, 17, 1] forward	f32	68	198ec2a39c0910f6fe5b35ff5a5d8a8883a6b99629b71091691e7331ba279016
+tensor::tests::ops::reductions::sum_dim 2 [4, 17, 1] gradient	f32	68	c055bef9355bd2186abf691b25cacc9e1ae877508165eeb462b341d509a80b7b
+tensor::tests::ops::reductions::sum_dim long forward	f32	3	42e639af975d1679a9e8cb843b4217568002047c2af79d8437ee6c3ec0e05a9f
+tensor::tests::ops::reductions::sum_dim long gradient	f32	3003	d305314863dc7dec8136e1df2ae5bad276e5958d0af051d2b839be7c5bb68e62
+tensor::tests::ops::scalar_and_unary_ops::abs forward	f32	130	06e0dbb78d8bb9653e944e50335fb9648633957322cfe06b39b3f91ad4f47a13
+tensor::tests::ops::scalar_and_unary_ops::abs gradient	f32	130	3451ba24b64548009739f0b2400f682556f9af0efc87b4583b5bb4416fec86ec
+tensor::tests::ops::scalar_and_unary_ops::add_scalar forward	f32	130	273edc03562a69c74b412d30d02b1fbaca15b1ef84b3bf26166c2ee791b04d0d
+tensor::tests::ops::scalar_and_unary_ops::add_scalar gradient	f32	130	3756c42212557962d65f990fc354b45a635990d2baf06f882b4ef7b374845d68
+tensor::tests::ops::scalar_and_unary_ops::clamp forward	f32	130	d13049b930f9875158e21caed97c46124876ba9ea4a2e00b689585b39fcbda9b
+tensor::tests::ops::scalar_and_unary_ops::clamp gradient	f32	130	07811d46d9a4e4ab07b68fa127f9a12690471ecd6f5c5bcae52b8df6201ee055
+tensor::tests::ops::scalar_and_unary_ops::clamp_max forward	f32	130	14d7808e829f670292fd0652c3afed1613259c8cf6b62460cb68d5a970cace32
+tensor::tests::ops::scalar_and_unary_ops::clamp_max gradient	f32	130	cc82af22fbac471eaeda8dddbb0ac34ffceea69529fb993aaf0a3afe1140e0fd
+tensor::tests::ops::scalar_and_unary_ops::clamp_min forward	f32	130	af28081d2b1c0f9261ffb916af2d5855ab75673145a86e034b4c23bd4ed447bf
+tensor::tests::ops::scalar_and_unary_ops::clamp_min gradient	f32	130	aee2a653517536d7d24a077033cb1951a11c24cce09d50e97aba5caa6e26e8f5
+tensor::tests::ops::scalar_and_unary_ops::div_scalar forward	f32	130	dbaa47dd549bb8b01a7151887053ab8b0e4dc38ae73d33be6944a50f482d8240
+tensor::tests::ops::scalar_and_unary_ops::exp forward	f32	130	9855d976d024f0a80e1f09e315515f47149ce179d9a9657c8b774e2d763cf0b2
+tensor::tests::ops::scalar_and_unary_ops::exp gradient	f32	130	40f39bcace89b834e9e77cc1d230d80aa06b0864544291107297ae9bad296c86
+tensor::tests::ops::scalar_and_unary_ops::log forward	f32	130	690a545431bc5956a6b4f692e82efe3cb0a09781d87c99d60177ca056b2754b7
+tensor::tests::ops::scalar_and_unary_ops::mul_scalar forward	f32	130	a8d6910bdb4d70da97d24fcb59a0287fa1250f5ad588adba278163f47c59e084
+tensor::tests::ops::scalar_and_unary_ops::mul_scalar gradient	f32	130	6273d727f8e712ba95501b816c8c9683acc5ca297eb008eaebc1bd3f646110ca
+tensor::tests::ops::scalar_and_unary_ops::neg forward	f32	130	2454234182e4af5d72481e87fc68662c06f009b09966187a5cba0966e696c7ee
+tensor::tests::ops::scalar_and_unary_ops::neg gradient	f32	130	9383272308e144ba15215588c89a21da406234cb69b98dc8f23c2a8f4506f33b
+tensor::tests::ops::scalar_and_unary_ops::powf 0.5 forward	f32	130	3830c7ccea31f7ea60ed265f903281c611b17a2de88216c13b792e159fac1558
+tensor::tests::ops::scalar_and_unary_ops::powf 0.5 gradient	f32	130	5b256f814a914a6638e9c7c097fcf13553b1de66daefb739f632ae4783d3aa14
+tensor::tests::ops::scalar_and_unary_ops::powf 2 forward	f32	130	91bbe3a2894b0c453d357645c4818126933a6a510aac6134dc7e5a2463c3d6a2
+tensor::tests::ops::scalar_and_unary_ops::powf 2 gradient	f32	130	598422842cc3515810d8e5fa33ad8d86726e5090bcba56042fe58f267d5d7367
+tensor::tests::ops::scalar_and_unary_ops::powf 3 forward	f32	130	c712e599bc0aa6b1758bd7d613cca5d0b5f0bce16a3d0e301356a8f32fd4c894
+tensor::tests::ops::scalar_and_unary_ops::powf 3 gradient	f32	130	0414128bf9dae624ae1841cc2aea8576fd1ee3b31c9fcd2aef5c849924ac8718
+tensor::tests::ops::scalar_and_unary_ops::recip forward	f32	130	970953c8df3848b1e3f2c90170dbffd3ae3c4a3f1d88d72b819a23af7389d9cd
+tensor::tests::ops::scalar_and_unary_ops::rms chain forward	f32	130	c4949fe13daa8649fc413673e50ce5e3bb87138c1a40356c4d861b8c7635ccbd
+tensor::tests::ops::scalar_and_unary_ops::sqrt forward	f32	130	cb4ba04c7902a6201d86579961d436600d4bf4e24ed66e525c010e12d9339b03
+tensor::tests::ops::scalar_and_unary_ops::sub_scalar forward	f32	130	8ecef6f088e482b77115a0f03d3b1c113de4744dbc4d2a7d83f9049f7c8e53e8
+tensor::tests::ops::scalar_and_unary_ops::sub_scalar gradient	f32	130	3756c42212557962d65f990fc354b45a635990d2baf06f882b4ef7b374845d68
