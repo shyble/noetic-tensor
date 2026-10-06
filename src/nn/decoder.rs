@@ -1,7 +1,7 @@
-//! The decoder: token embedding plus positions, `blocks` pre-norm blocks, a
-//! final norm and a linear readout, every position read out. The defaults
-//! (`DecoderConfig::new`): RMS norms, the gated MLP, learned positions, kv_heads = heads, no
-//! dropout, compact block naming (`BlockNaming::Compact`) and the one-hot embedding.
+//! The decoder: token embedding plus positions, `blocks` pre-norm blocks, a final norm and a
+//! linear readout, every position read out. The defaults (`DecoderConfig::new`): RMS norms, the
+//! gated MLP, learned positions, kv_heads = heads, no dropout, `BlockNaming::Compact` and the
+//! one-hot embedding.
 //!
 //! Vars, in order: "embed" `[V, d]`, "pos" `[context, d]` (learned positions only; both N(0, 1)),
 //! each block's (under its prefix), "norm_out" (and "norm_out_bias" for LayerNorm), "readout"
@@ -9,7 +9,7 @@
 //!
 //! Options:
 //! - `norm`: RMSNorm or LayerNorm;
-//! - `mlp`: the gated MLP (SwiGLU), a plain MLP, or an MoE (`MlpKind::Moe`);
+//! - `mlp`: the gated MLP, SwiGLU, a plain MLP, or an MoE (`MlpKind::Moe`);
 //! - `positions`: learned or RoPE;
 //! - `kv_heads`: grouped-query attention;
 //! - `dropout`: residual dropout in training, labelled per block, plus "embed" after the
@@ -31,12 +31,12 @@ use super::module::Module;
 use super::rotary::RopeConfig;
 use super::var::VarMap;
 use super::var_builder::VarBuilder;
-use crate::error::{Error, Result};
+use crate::error::{NnError, Result};
 use crate::tensor::{BoolTensor, IntTensor, Tensor};
 use std::cell::RefCell;
 
 /// How block j's vars are prefixed.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum BlockNaming {
     /// Block 0 unprefixed ("wq"), block j ≥ 1 "b{j}." ("b1.wq").
     #[default]
@@ -55,7 +55,7 @@ impl BlockNaming {
 }
 
 /// How positions enter.
-#[derive(Clone, Copy, Debug, PartialEq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub enum Positions {
     /// A learned table "pos" `[context, d]` added to the embeddings.
     #[default]
@@ -64,7 +64,7 @@ pub enum Positions {
     Rope(RopeConfig),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct DecoderConfig {
     pub vocab: usize,
     pub d: usize,
@@ -84,11 +84,15 @@ pub struct DecoderConfig {
     /// Residual and embedding dropout in training (0: none), and the root of its streams.
     pub dropout: f64,
     pub dropout_root: u64,
+    /// An extension of every block's gated MLP (`MlpExtension`; gated MLP only). Not serialised: a
+    /// caller that uses one records it in its own terms.
+    #[serde(skip)]
+    pub mlp_ext: Option<super::mlp::MlpExt>,
 }
 
 impl DecoderConfig {
-    /// The default decoder at these sizes: one-hot embedding, compact naming, RMS norms, the
-    /// gated MLP, learned positions, multi-head attention, no dropout.
+    /// The default decoder at these sizes: one-hot embedding, unprefixed naming, RMS norms, the
+    /// gated MLP, learned positions, multi-head attention, no dropout, no MLP extension.
     pub fn new(vocab: usize, d: usize, heads: usize, context: usize, blocks: usize, mlp_hidden: usize) -> Self {
         DecoderConfig {
             vocab,
@@ -105,6 +109,7 @@ impl DecoderConfig {
             kv_heads: heads,
             dropout: 0.0,
             dropout_root: 0,
+            mlp_ext: None,
         }
     }
 
@@ -132,6 +137,7 @@ impl DecoderConfig {
             norm: self.norm,
             mlp: self.mlp,
             hidden: self.mlp_hidden,
+            mlp_ext: self.mlp_ext.clone(),
             dropout: self.dropout,
             dropout_root: self.dropout_root,
         }
@@ -177,10 +183,10 @@ impl Decoder {
     /// Build from `vb`: in init mode this creates the vars in the order listed above.
     pub fn new(cfg: DecoderConfig, vb: &VarBuilder) -> Result<Self> {
         if cfg.blocks == 0 || cfg.vocab == 0 || cfg.context == 0 || cfg.mlp_hidden == 0 {
-            return Err(Error::Config(format!("decoder: vocab, context, blocks and MLP width must be positive ({cfg:?})")));
+            return Err(NnError::Config(format!("decoder: vocab, context, blocks and MLP width must be positive ({cfg:?})")));
         }
         if !(0.0..1.0).contains(&cfg.dropout) {
-            return Err(Error::Config(format!("decoder: dropout {} outside [0, 1)", cfg.dropout)));
+            return Err(NnError::Config(format!("decoder: dropout {} outside [0, 1)", cfg.dropout)));
         }
         let embed = embedding(cfg.vocab, cfg.d, "embed", cfg.embedding, vb)?;
         let pos = match cfg.positions {
@@ -188,7 +194,7 @@ impl Decoder {
             Positions::Rope(_) => None,
         };
         let bc = cfg.block_config();
-        let blocks = (0..cfg.blocks).map(|j| block_with(bc, &vb.pp(&cfg.naming.prefix(j)))).collect::<Result<Vec<_>>>()?;
+        let blocks = (0..cfg.blocks).map(|j| block_with(bc.clone(), &vb.pp(&cfg.naming.prefix(j)))).collect::<Result<Vec<_>>>()?;
         let norm_out = norm(cfg.norm, cfg.d, "norm_out", vb)?;
         let readout = linear(cfg.d, cfg.vocab, "readout", vb)?;
         let drop = (cfg.dropout > 0.0).then(|| Dropout::new(cfg.dropout, cfg.dropout_root, vb.path("embed")));
@@ -224,7 +230,7 @@ impl Decoder {
         self.trunk_observed(tokens, &mut |_, _, _| {})
     }
 
-    /// As `trunk`, calling `observe(j, xn, hidden)` for block j's MLP input and hidden activations.
+    /// As `trunk`, calling `observe(j, xn, hidden)` for block j's MLP input and hidden units.
     pub fn trunk_observed(&self, tokens: &IntTensor, observe: &mut dyn FnMut(usize, &Tensor, &Tensor)) -> Tensor {
         self.trunk_full(tokens, &ForwardOptions::default(), observe).0
     }
@@ -296,7 +302,7 @@ impl Decoder {
         self.head(&x)
     }
 
-    /// Growing caches for this decoder's blocks.
+    /// Empty, extendable caches for this decoder's blocks.
     pub fn cache(&self) -> DecoderCache {
         DecoderCache::new(self.blocks.len())
     }

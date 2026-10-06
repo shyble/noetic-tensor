@@ -301,7 +301,7 @@ struct ScalarOp { uint op; float s; };
 // ---------------------------------------------------------------- nn::Adam, fused
 // One thread per element, the same f32 operations in the same order as nn::Adam's op sequence
 // (each op rounds; no contraction: the products are kept apart from the sums). flags: 1 coupled
-// decay, 2 decoupled decay before the step (torch), 4 after it (the default).
+// decay, 2 decoupled decay before the step (torch), 4 after it (DecayOrder::AfterStep).
 
 struct AdamScalars { float wd, b1, omb1, b2, omb2, bc1, bc2, eps, lr, pre, post; uint flags; };
 
@@ -468,8 +468,8 @@ kernel void max_all_f32(device const float* x [[buffer(0)]], device float* y [[b
     y[0] = a;
 }
 
-// The first maximum along the lane, its index and value, NaN-propagating as CpuRef's argmax
-//: the first NaN is the maximum; otherwise a strictly greater value replaces.
+// The first maximum along the lane, its index and value, NaN-propagating as CpuRef's argmax:
+// the first NaN is the maximum; otherwise a strictly greater value replaces.
 kernel void argmax_dim_f32(device const float* x [[buffer(0)]], device uint* idx [[buffer(1)]], device float* val [[buffer(2)]],
                            constant Lanes& p [[buffer(3)]], uint t [[thread_position_in_grid]]) {
     if (t >= p.outer * p.inner) return;

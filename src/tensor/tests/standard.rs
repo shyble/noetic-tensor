@@ -1,4 +1,5 @@
-//! The standard semantics that replace burn 0.21's where burn's differed: NaN-propagating max and argmax, a stable
+//! The standard semantics that replace burn 0.21's where burn's differed:
+//! NaN-propagating max and argmax, a stable
 //! descending sort (ties by source position on every lane length), `detach` that always
 //! untracks, and a stable `logsumexp`.
 
@@ -127,7 +128,7 @@ fn logsumexp_is_stable_and_exact_at_infinities() {
     assert!((d.to_vec_f64()[0] - want).abs() < 1e-15);
 }
 
-// ------------------------------------------------------------------ the standard formulations
+// ------------------------------------------------------------------ the standard numerics
 
 fn f64t(x: &[f64], shape: &[usize]) -> Tensor {
     Tensor::from_f64s(x.to_vec(), shape.to_vec(), DType::F64)
@@ -172,7 +173,7 @@ fn against_f64(name: &str, shape: &[usize], x: &[f32], tol: f64, op: impl Fn(Ten
     }
 }
 
-/// Every operation whose numerics differ from burn's, in f64 against finite differences and in f32
+/// Every operation whose numerics changed from burn's, in f64 against finite differences and in f32
 /// against f64.
 #[test]
 fn changed_operations_match_finite_differences_and_f64() {
@@ -226,7 +227,7 @@ fn changed_operations_match_finite_differences_and_f64() {
 
 /// The sigmoid: within 2 ulp of the correctly rounded value on a dense grid over the whole f32
 /// range where it is not saturated (burn's exp(−ln(1 + e^−x)) lost relative precision for large
-/// negative x, the ulp error growing with |x|), exactly 0 and 1 in the saturated tails, NaN for
+/// negative x, the ulp error rising with |x|), exactly 0 and 1 in the saturated tails, NaN for
 /// NaN; in f64, computed in f64 (burn's cast to f32).
 #[test]
 fn sigmoid_is_accurate_over_the_range() {
@@ -252,7 +253,15 @@ fn sigmoid_is_accurate_over_the_range() {
     assert!(y64[0] > 0.0 && y64[0] < 1e-300, "f64 keeps the tail f32 would flush to 0");
 }
 
-// ------------------------------------------------------------------ ulp guards
+/// The facade's `from_floats` keeps f64 values on an f64 backend (burn went through f32).
+#[test]
+fn from_floats_keeps_f64() {
+    use crate::tensor::api::backend::NdArray;
+    let t = crate::tensor::api::Tensor::<NdArray<f64>, 1>::from_floats([0.1f64, 1.0 / 3.0], &Default::default());
+    assert_eq!(t.into_raw().to_vec_f64(), vec![0.1, 1.0 / 3.0]);
+}
+
+// ------------------------------------------------------------------ ulp guards (ML review, condition 3)
 
 /// Distance in f32 units in the last place between `a` and the f64 value `r` rounded to f32.
 fn ulps_to(a: f32, r: f64) -> u64 {
@@ -283,7 +292,8 @@ fn grad_ulps(n: usize, inputs: &[Vec<f32>], wrt: usize, op: impl Fn(&[Tensor]) -
         .unwrap()
 }
 
-/// The standard backward forms at their measured worst case: a future edit that loses precision fails here, where
+/// The backward forms that changed from burn's, at their measured worst case (10⁵
+/// random points each): a future edit that loses precision fails here, where
 /// `changed_operations_match_finite_differences_and_f64` (1e-6 relative) would still pass.
 #[test]
 fn changed_backward_forms_stay_within_their_ulp_bounds() {
@@ -317,7 +327,8 @@ fn changed_backward_forms_stay_within_their_ulp_bounds() {
 }
 
 /// softmax and log_softmax backward, rows of 17 and 1000: the worst |error| over the row's largest
-/// gradient against f64, at twice the measured value.
+/// gradient against f64, at twice the measured value (the rows-of-17 softmax figure is one of
+/// the two accepted regressions).
 #[test]
 fn softmax_backward_errors_stay_within_their_bounds() {
     for (len, rows, sm_bound, lsm_bound) in [(17usize, 6_000usize, 7.9e-5, 1.3e-6), (1000, 100, 3.0e-6, 9.1e-7)] {

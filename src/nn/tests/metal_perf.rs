@@ -60,7 +60,7 @@ fn profile(what: &str, cfg: &DecoderConfig, s: usize, b: usize) {
     let host = wall.saturating_sub(p.wait_ns);
     eprintln!("metal profile {what}: per step wall {:.2} ms = host {:.2} ms (encode {:.2}, buffer creation {:.2}, uploads {:.2}, other host work {:.2}) + blocked in sync {:.2} ms; GPU busy {:.2} ms",
         ms(wall, N), ms(host, N), ms(p.encode_ns, N), ms(p.alloc_ns, N), ms(p.upload_ns, N), ms(host.saturating_sub(p.encode_ns + p.alloc_ns + p.upload_ns), N), ms(p.wait_ns, N), ms(p.gpu_ns, N));
-    eprintln!("metal profile {what}: per step {} kernels, {} command buffers, {} syncs, {} buffer allocations ({} served by the pool), {} uploads ({} bytes)",
+    eprintln!("metal profile {what}: per step {} kernels, {} command buffers, {} syncs, {} buffer requests ({} served by the pool), {} uploads ({} bytes)",
         p.dispatches / N as u64, p.commits / N as u64, p.syncs / N as u64, p.allocs / N as u64, p.pool_hits / N as u64, p.uploads / N as u64, p.upload_bytes / N as u64);
     // Per-kernel GPU time (each kernel its own command buffer: inflated totals, true split).
     // Steady-state GPU time per kernel: record one step's dispatches, replay each 10 times
@@ -156,8 +156,8 @@ fn metal_perf_matmul_rule_ab() {
         let (tk, tg, mk) = batch(s, b, cfg.context, cfg.vocab, 7);
         let mut t = [Vec::new(), Vec::new()];
         for round in 0..16 {
-            let arm = (round % 2) as usize;
-            over.store(if arm == 0 { usize::MAX } else { 0 }, Ordering::SeqCst);
+            let side = (round % 2) as usize;
+            over.store(if side == 0 { usize::MAX } else { 0 }, Ordering::SeqCst);
             train_step(&cfg, &mut vars, &mut opt, &tk, &tg, &mk, round, AuxWeights::default(), 1.0);
             nt::synchronize(M).unwrap();
             let _ = nt::metal_profile();
@@ -167,7 +167,7 @@ fn metal_perf_matmul_rule_ab() {
             let wall = t0.elapsed().as_secs_f64() * 1e3;
             let gpu = nt::metal_profile().gpu_ns as f64 / 1e6;
             if round >= 2 {
-                t[arm].push((wall, gpu));
+                t[side].push((wall, gpu));
             }
         }
         over.store(usize::MAX, Ordering::SeqCst);
@@ -195,14 +195,14 @@ fn metal_perf_flush_ab() {
         let (tk, tg, mk) = batch(s, b, cfg.context, cfg.vocab, 7);
         let mut t: Vec<Vec<f64>> = vec![Vec::new(); sizes.len()];
         for round in 0..(8 * sizes.len()) {
-            let arm = round % sizes.len();
-            crate::tensor::metal::FLUSH.store(sizes[arm], Ordering::SeqCst);
+            let side = round % sizes.len();
+            crate::tensor::metal::FLUSH.store(sizes[side], Ordering::SeqCst);
             nt::synchronize(M).unwrap();
             let t0 = std::time::Instant::now();
             train_step(&cfg, &mut vars, &mut opt, &tk, &tg, &mk, round as u64, AuxWeights::default(), 1.0);
             nt::synchronize(M).unwrap();
             if round >= sizes.len() {
-                t[arm].push(t0.elapsed().as_secs_f64() * 1e3);
+                t[side].push(t0.elapsed().as_secs_f64() * 1e3);
             }
         }
         crate::tensor::metal::FLUSH.store(256, Ordering::SeqCst);

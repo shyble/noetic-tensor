@@ -20,7 +20,7 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 pub(crate) struct Buffer {
     id: Id,
     bytes: usize,
-    /// The allocation's size class in bytes (0: not pooled).
+    /// The buffer's size class in bytes (0: not pooled).
     cap: usize,
 }
 
@@ -38,7 +38,7 @@ impl Drop for Buffer {
     }
 }
 
-/// The buffer pool: freed buffers by size class, reused by later allocations instead of
+/// The buffer pool: freed buffers by size class, reused by later requests instead of
 /// creating new MTLBuffers (≈ 5 µs each). A buffer freed while GPU work is still encoded or in
 /// flight may be read by that work, so it is reused at once only as a kernel output (kernels
 /// run in encoding order, so the earlier reader runs before the new writer); a host write
@@ -237,13 +237,13 @@ pub fn replay_trace(reps: usize) -> std::collections::BTreeMap<&'static str, (u6
     let Some(trace) = c.trace.take() else { return out };
     let _ = c.sync();
     for t in &trace {
-        let g0 = c.prof.borrow().gpu_ns;
+        let gpu0 = c.prof.borrow().gpu_ns;
         for _ in 0..reps {
             // SAFETY: the recorded ids are retained live buffers.
             unsafe { c.dispatch_raw(t.kernel, &t.args, t.groups, t.threads) };
         }
         let _ = c.sync();
-        let dt = c.prof.borrow().gpu_ns - g0;
+        let dt = c.prof.borrow().gpu_ns - gpu0;
         if std::env::var_os("NOETIC_METAL_TRACE").is_some() {
             let p = t.args.iter().rev().find_map(|a| a.as_ref().err()).map(|b| b.iter().take(28).copied().collect::<Vec<u8>>()).unwrap_or_default();
             let words: Vec<u32> = p.chunks_exact(4).map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect();
@@ -270,10 +270,9 @@ unsafe impl Send for Context {}
 
 static CTX: OnceLock<std::result::Result<Mutex<Context>, String>> = OnceLock::new();
 
-#[cfg(test)]
-#[cfg(test)]
 /// Kernels encoded since the Metal device was created (0 before).
-pub(crate) fn dispatches() -> u64 {
+#[doc(hidden)]
+pub fn dispatches() -> u64 {
     match CTX.get() {
         Some(Ok(m)) => m.lock().unwrap_or_else(|e| e.into_inner()).dispatches,
         _ => 0,
@@ -284,6 +283,20 @@ pub(crate) fn dispatches() -> u64 {
 /// Whether this process has created the Metal device.
 pub(crate) fn initialized() -> bool {
     CTX.get().is_some()
+}
+
+/// Memory this process holds on the Metal device and the device's recommended working-set
+/// limit, in bytes (`currentAllocatedSize`, `recommendedMaxWorkingSetSize`); None until this
+/// process has created its context (it never creates one).
+pub fn memory() -> Option<(u64, u64)> {
+    match CTX.get() {
+        Some(Ok(m)) => {
+            let c = m.lock().unwrap_or_else(|e| e.into_inner());
+            // SAFETY: both are NSUInteger / uint64_t properties of MTLDevice, sent with that signature.
+            unsafe { Some((msg!(usize; c.device, "currentAllocatedSize") as u64, msg!(u64; c.device, "recommendedMaxWorkingSetSize"))) }
+        }
+        _ => None,
+    }
 }
 
 /// The Metal context (created on first use). Refused in a pinned process.
@@ -474,9 +487,9 @@ impl Context {
             p.kernels.entry(kernel).or_default().0 += 1;
         }
         if PER_KERNEL.load(std::sync::atomic::Ordering::Relaxed) {
-            let g0 = self.prof.borrow().gpu_ns;
+            let gpu0 = self.prof.borrow().gpu_ns;
             self.sync()?;
-            let dt = self.prof.borrow().gpu_ns - g0;
+            let dt = self.prof.borrow().gpu_ns - gpu0;
             if std::env::var_os("NOETIC_METAL_TRACE").is_some() && dt > 1_000_000 {
                 eprintln!("metal trace: {kernel} took {:.3} ms on the GPU (groups {:?}, threads {:?})", dt as f64 / 1e6, groups, threads);
             }
@@ -557,7 +570,8 @@ impl Context {
 }
 
 /// Kernels per command buffer before it is committed (without waiting).
-pub(crate) static FLUSH: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(256);
+#[doc(hidden)]
+pub static FLUSH: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(256);
 
 /// Bytes of a plain-old-data value (kernel parameters).
 pub(crate) fn bytes_of<T: Copy>(v: &T) -> &[u8] {
@@ -565,12 +579,12 @@ pub(crate) fn bytes_of<T: Copy>(v: &T) -> &[u8] {
     unsafe { std::slice::from_raw_parts(v as *const T as *const u8, std::mem::size_of::<T>()) }
 }
 
-/// Threadgroups covering `n` threads in groups of `per`.
+/// Threadgroups spanning `n` threads in groups of `per`.
 pub(crate) fn groups_1d(n: usize, per: usize) -> (MTLSize, MTLSize) {
     (MTLSize::new(n.div_ceil(per), 1, 1), MTLSize::new(per, 1, 1))
 }
 
-// ---------------------------------------------------------------- raw device entry points
+// ---------------------------------------------------------------- raw entry points
 
 /// Matmul parameters (the kernel's `MatmulParams`).
 #[repr(C)]
@@ -601,9 +615,10 @@ pub(crate) const MATMUL_VARIANTS: [(&str, usize, usize, usize, usize); 10] = [
 
 /// A forced matmul variant (index into MATMUL_VARIANTS; out of range: the rule below). For
 /// measurements only.
-pub(crate) static MATMUL_OVERRIDE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(usize::MAX);
+#[doc(hidden)]
+pub static MATMUL_OVERRIDE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(usize::MAX);
 
-/// The variant for an m×k·k×n matmul over `batches` (measured on the M1 Pro): 64×64 tiles
+/// The variant for an m×k·k×n matmul over `batches` (measured on an Apple M-series GPU): 64×64 tiles
 /// with 4×4 per thread, except when those give fewer than 32 threadgroups (two per GPU core)
 /// over a long k, where 16×16 tiles of one output per thread finish the serial k chains about
 /// twice as fast. Every variant gives the same bits.

@@ -1,4 +1,5 @@
-//! An exponential moving average of the vars: the average starts at zero, `acc · decay + x · (1 − decay)` per update, and `averaged()` divides by
+//! An exponential moving average of the vars: the
+//! average starts at zero, `acc · decay + x · (1 − decay)` per update, and `averaged()` divides by
 //! 1 − decayᵗ (bias correction), so early evaluations are not dominated by the initial weights.
 
 use super::var::VarMap;
@@ -24,7 +25,7 @@ impl Ema {
         }
     }
 
-    /// The bias-corrected average (one update at least is assumed).
+    /// The bias-corrected average (one update at least is assumed, as the trainer's).
     pub fn averaged(&self) -> VarMap {
         let c = 1.0 - self.decay.powi(self.t.max(1) as i32);
         let mut out = VarMap::new();

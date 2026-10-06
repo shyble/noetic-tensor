@@ -1,5 +1,5 @@
 //! Per-operation parity: forward values and gradients bit-equal to burn 0.21's, recorded from
-//! burn (fixtures/burn021-<os>-<arch>.txt). Where the standard formulations changed an operation,
+//! burn (fixtures/burn021-<os>-<arch>.txt). Where the standard formulations changed an operation's numerics,
 //! only what did not change is compared with burn: the forward
 //! values (`check*_fwd`) of div, div_scalar, log, sqrt, recip, mean, mean_dim, softmax,
 //! log_softmax and the broadcast matmul; their gradients, and sigmoid and silu, are checked in
@@ -128,7 +128,7 @@ fn indexing_ops() {
     check1("gather dim 2", S3, &x, |z| z.gather(2, our_ints(&idx2, [2, 5, 4])));
     let sel: Vec<i64> = vec![3, 0, 3, 12];
     check1("select", S3, &x, |z| z.select(2, our_ints(&sel, [4])));
-    // topk with ties (many equal −1e9 entries).
+    // topk with ties (many values at −1e9).
     let mut tk = rnd(3 * 4 * 16, 24, -1.0, 1.0);
     for i in (0..tk.len()).step_by(3) {
         tk[i] = -1e9;
@@ -157,7 +157,7 @@ fn activations() {
 
 #[test]
 fn detach_and_masked_stop_gradient() {
-    // r·m + detach(r)·(1 − m): the gradient flows only where the mask is 1.
+    // r·m + detach(r)·(1 − m): a masked stop-gradient.
     let x = x3(27);
     let m: Vec<f32> = (0..2 * 5).map(|i| (i % 2) as f32).collect();
     check1(

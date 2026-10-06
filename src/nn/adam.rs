@@ -100,8 +100,7 @@ impl Adam {
         self.t = t;
     }
 
-    /// Zero the moments of var `name` where `mask` is 1 (broadcastable), for example after
-    /// re-initialising part of a var.
+    /// Zero the moments of var `name` where `mask` is 1 (broadcastable).
     pub fn reset_moments(&mut self, name: &str, mask: Tensor) {
         let i = self.groups.names().iter().position(|n| n == name).unwrap_or_else(|| panic!("no var named {name:?}"));
         let keep = mask.neg() + 1.0;

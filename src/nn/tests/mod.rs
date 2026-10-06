@@ -17,8 +17,8 @@ mod fd;
 #[cfg(all(feature = "metal", target_os = "macos"))]
 mod metal_perf;
 mod components;
-mod options;
 mod naive;
+mod options;
 mod props;
 
 use crate::tensor::{IntTensor, Tensor};
@@ -41,6 +41,50 @@ pub(crate) fn rnd_ints(n: usize, seed: u64, hi: i64) -> Vec<i64> {
 
 
 
+
+/// A test extension of the gated MLP: a learned shift of the gate's pre-activation ("gate_shift",
+/// zeros) and a per-hidden-unit scale of the hidden activations ("hidden_scale", ones), both `[1, m]`.
+#[derive(Debug)]
+pub(crate) struct Affine;
+
+#[derive(Debug)]
+pub(crate) struct AffineT {
+    shift: Tensor,
+    scale: Tensor,
+}
+
+impl AffineT {
+    pub(crate) fn new(shift: Tensor, scale: Tensor) -> Self {
+        AffineT { shift, scale }
+    }
+}
+
+impl crate::nn::MlpExtension for Affine {
+    fn name(&self) -> &str {
+        "affine"
+    }
+    fn build(&self, m: usize, vb: &crate::nn::VarBuilder) -> crate::error::Result<std::sync::Arc<dyn crate::nn::MlpTransform>> {
+        let shift = vb.get(&[1, m], "gate_shift", crate::nn::init::Init::Const(0.0))?;
+        let scale = vb.get(&[1, m], "hidden_scale", crate::nn::init::Init::Const(1.0))?;
+        Ok(std::sync::Arc::new(AffineT { shift, scale }))
+    }
+}
+
+impl crate::nn::MlpTransform for AffineT {
+    fn gate(&self, pre: Tensor) -> Tensor {
+        let r = pre.rank();
+        pre + crate::nn::linear::to_rank(&self.shift, r)
+    }
+    fn hidden(&self, h: Tensor) -> Tensor {
+        let r = h.rank();
+        h * crate::nn::linear::to_rank(&self.scale, r)
+    }
+}
+
+/// `Affine` as a config value.
+pub(crate) fn affine() -> crate::nn::MlpExt {
+    crate::nn::MlpExt::new(Affine)
+}
 
 /// Bit equality of two f32 sequences, with the first mismatch in the message.
 #[track_caller]

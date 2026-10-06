@@ -1,6 +1,6 @@
 // CUDA-only tests: the raw device API (`CudaDevice`): the pin, device info and
-// key, cuBLAS sgemm parity, shape errors, and the latency and crossover table. The raw
-// device's vector add and tiled sgemm run in the generic bodies (raw.rs). Included by gpu/mod.rs.
+// key, cuBLAS sgemm parity, shape errors, and the raw latency and crossover table. The raw
+// vector add and tiled sgemm run in the generic raw bodies (raw.rs). Included by gpu/mod.rs.
 
 #[allow(unused_imports)]
 use super::*;

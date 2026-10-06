@@ -1,5 +1,5 @@
-//! Layout: how a tensor reads its storage — shape, strides and offset. Since
-//! reshape (of a row-major layout), unsqueeze, swap_dims, slice and expand are views: new
+//! Layout: how a tensor reads its storage — shape, strides and offset.
+//! Reshape (of a row-major layout), unsqueeze, swap_dims, slice and expand are views: new
 //! layouts over the same storage. A kernel reads a view through `materialize` (row-major order),
 //! so values, and every arithmetic order, are those of a copied tensor.
 

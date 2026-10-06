@@ -1,7 +1,7 @@
 //! In-house 16-bit floats: IEEE 754 binary16
 //! (`F16`) and bfloat16 (`BF16`), stored as their bit patterns, with round-to-nearest-even
-//! conversions from f32 and exact conversions to f32. Arithmetic on them runs in
-//! f32: 16-bit types accumulate in f32.
+//! conversions from f32 and exact conversions to f32. Tensors store them and convert; arithmetic
+//! on them runs in f32 (16-bit types accumulate in f32).
 
 /// IEEE 754 half precision (1 sign, 5 exponent, 10 mantissa bits).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]

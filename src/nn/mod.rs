@@ -1,5 +1,4 @@
-//! Neural-network components on the tensors, structured like candle-nn. Every var carries a
-//! leading seed axis `[S, …]`, so S independently initialised models train in one pass.
+//! Neural-network components on the engine's tensors, structured like candle-nn.
 
 pub mod activation;
 pub mod adam;
@@ -42,7 +41,7 @@ pub use init::Init;
 pub use kv_cache::{DecoderCache, KvCache};
 pub use linear::{linear, linear_b, linear_init, Linear};
 pub use loss::{cross_entropy, cross_entropy_with, kl_div, masked_cross_entropy, mse, nll, CeOptions};
-pub use mlp::{gated_mlp, mlp, swiglu, GatedMlp, GatedMlpConfig, Mlp};
+pub use mlp::{gated_mlp, mlp, swiglu, GatedMlp, GatedMlpConfig, Mlp, MlpExt, MlpExtension, MlpTransform};
 pub use moe::{moe, Expert, ExpertKind, Moe, MoeConfig, MoeOutput};
 pub use module::{Module, ModuleT};
 pub use norm::{layer_norm, rms_norm, rms_normalize, LayerNorm, RmsNorm};

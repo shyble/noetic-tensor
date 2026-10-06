@@ -1,6 +1,6 @@
 [package]
 name = "noetic-tensor"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "A deterministic tensor engine with reverse-mode autodiff and a neural-network library, on the CPU, Apple Metal and NVIDIA CUDA, with almost no dependencies."
 license = "MIT OR Apache-2.0"
@@ -8,13 +8,18 @@ readme = "README.md"
 keywords = ["tensor", "autodiff", "neural-network", "metal", "cuda"]
 categories = ["science", "mathematics"]
 
+[lib]
+# Imported as `use noetic::tensor::…` and `use noetic::nn::…`.
+name = "noetic"
+
 [dependencies]
 rand = "0.8"
 rand_chacha = "0.3"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde_json = "1.0.151"
 sha2 = "0.10"
-# The gemm kernel behind the reference backend. Pinned: the bit-exact outputs depend on it.
+# The gemm kernel behind the reference backend, called directly. Pinned: the bit-exact outputs
+# depend on it (it is part of the platform key).
 matrixmultiply = { version = "=0.3.11", default-features = false, features = ["std"] }
 
 [features]

@@ -1,12 +1,12 @@
-//! The pre-norm block: `x + attn(norm_att(x))`, then `x + ff(norm_mlp(x))`. By
-//! default: RMS norms, causal multi-head attention and the gated MLP.
+//! The pre-norm block: `x + attn(norm_att(x))`, then `x + ff(norm_mlp(x))`. By default: RMS norms,
+//! causal multi-head attention and the gated MLP.
 //! Vars, in order: "norm_att" (and "norm_att_bias" for LayerNorm), the attention's "wq", "wk",
 //! "wv", "wo", "norm_mlp" (and its bias), then the feed-forward's vars.
 //!
 //! Options:
 //! - LayerNorm in place of RMSNorm;
 //! - GQA and RoPE in the attention;
-//! - a plain MLP or an MoE as the feed-forward;
+//! - a plain MLP, SwiGLU or an MoE as the feed-forward;
 //! - residual dropout on the attention and feed-forward outputs, in training only, labelled
 //!   "{prefix}attn" and "{prefix}ff";
 //! - a key padding mask.
@@ -16,7 +16,7 @@
 use super::attention::{attention, AttentionConfig, MultiHeadAttention};
 use super::dropout::Dropout;
 use super::kv_cache::KvCache;
-use super::mlp::{mlp, swiglu, GatedMlp, GatedMlpConfig, Mlp};
+use super::mlp::{gated_mlp, mlp, swiglu, GatedMlp, GatedMlpConfig, Mlp, MlpExt};
 use super::moe::{moe, Moe, MoeConfig, MoeOutput};
 use super::module::Module;
 use super::norm::{layer_norm, rms_norm, LayerNorm, RmsNorm};
@@ -25,7 +25,7 @@ use super::var_builder::VarBuilder;
 use crate::error::Result;
 use crate::tensor::{BoolTensor, Tensor};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum NormKind {
     #[default]
     Rms,
@@ -56,11 +56,13 @@ pub fn norm(kind: NormKind, d: usize, name: &str, vb: &VarBuilder) -> Result<Nor
 }
 
 /// The feed-forward's form.
-#[derive(Clone, Copy, Debug, PartialEq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub enum MlpKind {
-    /// The SiLU-gated MLP (SwiGLU).
+    /// The gated MLP (with the block's MLP extension, if any).
     #[default]
     Gated,
+    /// SwiGLU: the gated MLP without an extension.
+    SwiGlu,
     /// `out(act(in(x)))`.
     Plain(Activation),
     /// A mixture of experts; `d` and `hidden` are taken from the block.
@@ -68,7 +70,7 @@ pub enum MlpKind {
 }
 
 /// An MoE feed-forward's settings (width and expert width come from the block).
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct MoeSpec {
     pub experts: usize,
     pub top_k: usize,
@@ -85,12 +87,14 @@ pub enum FeedForward {
 }
 
 /// A block's settings.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct BlockConfig {
     pub attention: AttentionConfig,
     pub norm: NormKind,
     pub mlp: MlpKind,
     pub hidden: usize,
+    /// An extension of the gated MLP (`MlpExtension`; gated MLP only).
+    pub mlp_ext: Option<MlpExt>,
     /// Residual dropout probability and the root of its streams.
     pub dropout: f64,
     pub dropout_root: u64,
@@ -196,7 +200,7 @@ impl Block {
 
 /// The default block: width `d`, `heads` heads and the given gated MLP.
 pub fn block(d: usize, heads: usize, mlp: GatedMlpConfig, vb: &VarBuilder) -> Result<Block> {
-    block_with(BlockConfig { attention: AttentionConfig::causal(d, heads), norm: NormKind::Rms, mlp: MlpKind::Gated, hidden: mlp.hidden, dropout: 0.0, dropout_root: 0 }, vb)
+    block_with(BlockConfig { attention: AttentionConfig::causal(d, heads), norm: NormKind::Rms, mlp: MlpKind::Gated, hidden: mlp.hidden, mlp_ext: mlp.ext, dropout: 0.0, dropout_root: 0 }, vb)
 }
 
 /// A block by `cfg`; `vb.path("")` labels its dropout streams.
@@ -205,8 +209,12 @@ pub fn block_with(cfg: BlockConfig, vb: &VarBuilder) -> Result<Block> {
     let norm_att = norm(cfg.norm, d, "norm_att", vb)?;
     let attn = attention(cfg.attention, vb)?;
     let norm_mlp = norm(cfg.norm, d, "norm_mlp", vb)?;
+    if cfg.mlp_ext.is_some() && cfg.mlp != MlpKind::Gated {
+        return Err(crate::NnError::ExtensionNeedsGatedMlp);
+    }
     let ff = match cfg.mlp {
-        MlpKind::Gated => FeedForward::Gated(Box::new(swiglu(d, cfg.hidden, vb)?)),
+        MlpKind::Gated => FeedForward::Gated(Box::new(gated_mlp(GatedMlpConfig { d, hidden: cfg.hidden, ext: cfg.mlp_ext.clone() }, vb)?)),
+        MlpKind::SwiGlu => FeedForward::Gated(Box::new(swiglu(d, cfg.hidden, vb)?)),
         MlpKind::Plain(a) => FeedForward::Plain(Box::new(mlp(d, cfg.hidden, a, vb)?)),
         MlpKind::Moe(m) => FeedForward::Moe(Box::new(moe(MoeConfig { d, hidden: cfg.hidden, experts: m.experts, top_k: m.top_k, normalize_topk: m.normalize_topk, capacity_factor: m.capacity_factor, expert: m.expert }, &vb.pp("moe"))?)),
     };

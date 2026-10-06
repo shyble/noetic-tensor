@@ -17,7 +17,8 @@ fn rel(a: &[f32], b: &[f32]) -> f64 {
     a.iter().zip(b).map(|(x, y)| ((*x as f64 - *y as f64).abs()) / (1.0 + (*y as f64).abs())).fold(0.0, f64::max)
 }
 
-/// Run one ignored test body alone in a fresh process: the reference pin is process-wide.
+/// Run one ignored test body alone in a fresh process: the reference pin is process-wide, and
+/// any library test that pins the reference backend pins the shared test process.
 fn isolated(name: &str) {
     let out = std::process::Command::new(std::env::current_exe().expect("the test binary"))
         .args([name, "--exact", "--ignored", "--test-threads=1", "--nocapture"])
@@ -73,7 +74,7 @@ fn devices_body() {
     assert!(matches!(check_with(FAST, true), Err(TensorError::Unsupported(m)) if m.contains("pinned")), "a pinned process refuses Fast");
     assert!(check_with(Device::Cpu(CpuMode::Reference), true).is_ok());
     for g in [Device::Metal(0), Device::Cuda(0)] {
-        assert!(matches!(check_with(g, true), Err(TensorError::Unsupported(m)) if m.contains("pinned")), "a pinned process refuses {g:?} ");
+        assert!(matches!(check_with(g, true), Err(TensorError::Unsupported(m)) if m.contains("pinned")), "a pinned process refuses {g:?}");
     }
     let f = x.clone().to(FAST);
     assert_eq!(f.device(), FAST);

@@ -127,12 +127,13 @@ fn erf_is_within_its_bound_and_gelus_match_naive() {
     let gt = gelu_tanh(&t64(xs.clone(), &[n])).to_vec_f64();
     for (i, x) in xs.iter().enumerate() {
         assert!((ge[i] - gelu_exact(*x)).abs() <= 0.8e-7 * x.abs() + 1e-12, "gelu_erf({x})");
-        // tanh is 2·sigmoid(2z) − 1, in f64.
+        // tanh is 2·sigmoid(2z) − 1, in f64 (burn's sigmoid evaluated in f32: 1e-6).
         assert!((gt[i] - gelu_t(*x)).abs() <= 1e-12 * (1.0 + x.abs()), "gelu_tanh({x}): {} vs {}", gt[i], gelu_t(*x));
     }
     let r = relu(&t64(vec![-1.0, 0.0, 2.0], &[3])).to_vec_f64();
     assert_eq!(r, vec![0.0, 0.0, 2.0]);
-    // Finite differences in f64, both forms tight.
+    // Finite differences in f64, both forms tight (the tanh form once carried burn's
+    // f32 sigmoid and was checked at 1e-3).
     let x = rnd(24, 6, -3.0, 3.0);
     fd_check("gelu_erf", &x, &[24], &|t| gelu_erf(&t), 1e-6, 1e-6);
     fd_check("gelu_tanh", &x, &[24], &|t| gelu_tanh(&t), 1e-6, 1e-6);
@@ -150,12 +151,12 @@ fn mlps_match_naive() {
     let map = RefCell::new(VarMap::new());
     let vb = VarBuilder::init(&map, s, 2).with_dtype(DType::F64);
     let sw = swiglu(d, m, &vb.pp("sw")).unwrap();
-    let gm = gated_mlp(GatedMlpConfig { d, hidden: m }, &VarBuilder::from_varmap(&map.borrow()).pp("sw")).unwrap();
+    let gm = gated_mlp(GatedMlpConfig { d, hidden: m, ext: None }, &VarBuilder::from_varmap(&map.borrow()).pp("sw")).unwrap();
     let plain = mlp(d, m, Activation::GeluErf, &vb.pp("p")).unwrap();
     let vars = map.into_inner();
     let x = rnd(s * n * d, 7, -1.0, 1.0);
     let xt = t64(x.clone(), &[s, n, d]);
-    assert_eq!(sw.forward(&xt).to_vec_f64(), gm.forward(&xt).to_vec_f64(), "SwiGLU is the gated MLP");
+    assert_eq!(sw.forward(&xt).to_vec_f64(), gm.forward(&xt).to_vec_f64(), "SwiGLU equals the gated MLP with no extension");
     let g = |name: &str| vars.var(name).to_vec_f64();
     let (wi, wo) = (g("p.mlp_in"), g("p.mlp_out"));
     let mut want = Vec::new();
@@ -316,7 +317,8 @@ fn gqa_rope_and_padding_match_naive_and_finite_differences() {
     }
 }
 
-/// GQA at kv = heads is multi-head attention, operation for operation (bit-equal); GQA at kv < heads equals MHA whose key/value columns are repeated.
+/// GQA at kv = heads is multi-head attention, operation for operation (bit-equal, and the
+/// default sequence); GQA at kv < heads equals MHA whose key/value columns are repeated.
 #[test]
 fn gqa_equals_mha() {
     let (s, b, t, d, h) = (3, 2, 6, 16, 4);
@@ -493,10 +495,10 @@ fn schedules() {
 
 #[test]
 fn clipping_is_per_seed() {
-    let g1 = rnd(3 * 4, 60, -1.0, 1.0);
-    let g2 = rnd(3 * 6, 61, -1.0, 1.0);
-    let mut grads = vec![Some(t32(g1.clone(), &[3, 4])), None, Some(t32(g2.clone(), &[3, 2, 3]))];
-    let naive: Vec<f64> = (0..3).map(|k| (g1[k * 4..(k + 1) * 4].iter().chain(&g2[k * 6..(k + 1) * 6]).map(|x| { let x = (*x as f32) as f64; x * x }).sum::<f64>()).sqrt()).collect();
+    let ga = rnd(3 * 4, 60, -1.0, 1.0);
+    let gb = rnd(3 * 6, 61, -1.0, 1.0);
+    let mut grads = vec![Some(t32(ga.clone(), &[3, 4])), None, Some(t32(gb.clone(), &[3, 2, 3]))];
+    let naive: Vec<f64> = (0..3).map(|k| (ga[k * 4..(k + 1) * 4].iter().chain(&gb[k * 6..(k + 1) * 6]).map(|x| { let x = (*x as f32) as f64; x * x }).sum::<f64>()).sqrt()).collect();
     let norms = grad_norms_per_seed(&grads);
     assert_close("norms", &norms, &naive, 1e-12);
     // A bound between the seeds' norms: the small seeds stay exactly, the large ones clip.
@@ -517,8 +519,8 @@ fn clipping_is_per_seed() {
         }
     }
     // A seed's clipping does not depend on the other seeds' gradients.
-    let mut other = vec![Some(t32(g1.iter().enumerate().map(|(i, x)| if i < 4 { *x } else { x * 100.0 }).collect(), &[3, 4])), None, Some(t32(g2.iter().enumerate().map(|(i, x)| if i < 6 { *x } else { -x * 50.0 }).collect(), &[3, 2, 3]))];
-    let mut mine = vec![Some(t32(g1.clone(), &[3, 4])), None, Some(t32(g2.clone(), &[3, 2, 3]))];
+    let mut other = vec![Some(t32(ga.iter().enumerate().map(|(i, x)| if i < 4 { *x } else { x * 100.0 }).collect(), &[3, 4])), None, Some(t32(gb.iter().enumerate().map(|(i, x)| if i < 6 { *x } else { -x * 50.0 }).collect(), &[3, 2, 3]))];
+    let mut mine = vec![Some(t32(ga.clone(), &[3, 4])), None, Some(t32(gb.clone(), &[3, 2, 3]))];
     let _ = clip_grad_norm_per_seed(&mut other, 0.5);
     let _ = clip_grad_norm_per_seed(&mut mine, 0.5);
     assert_bits("seed 0 alone", &other[0].as_ref().unwrap().to_vec()[..4], &mine[0].as_ref().unwrap().to_vec()[..4]);

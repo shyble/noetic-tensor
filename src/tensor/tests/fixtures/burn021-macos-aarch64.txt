@@ -1,8 +1,7 @@
-# burn 0.21 outputs, recorded once from burn itself on the Mac (aarch64-apple-darwin): the values the parity tests
-# compare bit for bit with the per-op results, taken from the burn side of each comparison
-# (Autodiff<NdArray<f32>>, and NdArray<f64>). Operations whose numerics were later changed to the
-# standard formulations are not recorded here; their gradients are checked against f64 and finite
-# differences (tests::standard).
+# burn 0.21 outputs, recorded from burn itself on the Mac (aarch64): the values the per-op parity tests
+# compare bit for bit (from the burn side of each comparison: NdArray<f32>, Autodiff<NdArray<f32>>,
+# and NdArray<f64> run alone as the first backend of its process). Only the records of this
+# crate's tests are kept. TENSOR_FIXTURE_RECORD=FILE appends records instead of checking them.
 # key (test::label[#occurrence])	element type	count	sha256 of the little-endian bits
 tensor::tests::checks::softmax_of_nan_and_fully_masked_rows_is_burns::log_softmax with NaN / all −inf	f32	12	a699d58342a91070bdaeb51597f95a8728a3fb92c200d55dc94cf09c3daa4785
 tensor::tests::checks::softmax_of_nan_and_fully_masked_rows_is_burns::softmax with NaN / all −inf	f32	12	bd0e9e93c3e8820050a55fd999029db646adf15c7edff87186b423ae985c3990

@@ -33,6 +33,7 @@ extern "C" {
     pub fn cuDeviceGet(device: *mut CUdevice, ordinal: c_int) -> CUresult;
     pub fn cuDeviceGetName(name: *mut c_char, len: c_int, dev: CUdevice) -> CUresult;
     pub fn cuDeviceTotalMem_v2(bytes: *mut usize, dev: CUdevice) -> CUresult;
+    pub fn cuMemGetInfo_v2(free: *mut usize, total: *mut usize) -> CUresult;
     pub fn cuDeviceGetAttribute(pi: *mut c_int, attrib: c_int, dev: CUdevice) -> CUresult;
     pub fn cuDevicePrimaryCtxRetain(pctx: *mut CUcontext, dev: CUdevice) -> CUresult;
     pub fn cuDevicePrimaryCtxRelease_v2(dev: CUdevice) -> CUresult;

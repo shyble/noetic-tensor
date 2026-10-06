@@ -1,15 +1,17 @@
-//! The CUDA backend. `backend` implements `GpuBackend` (tensors on `Device::Cuda(0)`); the rest
-//! of this file is the raw device API: a device with its primary context, one stream and one
+//! The CUDA backend. `backend` implements `GpuBackend` (tensors on
+//! `Device::Cuda(0)`); the rest of this file is the raw device API: a device with its primary context, one stream and one
 //! cuBLAS handle; f32 buffers; kernels compiled at run time by NVRTC (vector add and a tiled
-//! sgemm of our own) and cuBLAS sgemm. Behind the `cuda` feature (off by default).
+//! sgemm of our own) and cuBLAS sgemm. Behind the `cuda` feature (off by default); nothing here
+//! is reachable from `Tensor` (tensors reach the GPU through `Storage::Gpu` and `backend`).
 //!
 //! Determinism: kernels are compiled without fast math and with `--fmad=false` (the only
 //! contraction is the explicit `fmaf` in sgemm, one per k in order); cuBLAS runs in pedantic math
 //! with TF32 off (`NVIDIA_TF32_OVERRIDE=0` is set before the handle is created if unset). A
 //! pinned process (`pin_reference`) never initialises the driver.
 
-pub(crate) mod backend;
-pub use backend::{profile_start, profile_take, ProfileReport};
+#[doc(hidden)]
+pub mod backend;
+pub use backend::{memory, profile_start, profile_take, ProfileReport};
 mod ffi;
 pub(crate) mod kernels;
 #[cfg(test)]
@@ -52,9 +54,9 @@ extern "C" __global__ void __launch_bounds__(256) sgemm_tiled(const float* __res
             int r = e / BK, c = e % BK;
             int gr = row0 + r, gc = k0 + c;
             As[c][r] = (gr < M && gc < K) ? A[(long long)gr * K + gc] : 0.0f;
-            int r2 = e / BN, c2 = e % BN;
-            int gr2 = k0 + r2, gc2 = col0 + c2;
-            Bs[r2][c2] = (gr2 < K && gc2 < N) ? B[(long long)gr2 * N + gc2] : 0.0f;
+            int rb = e / BN, cb = e % BN;
+            int grb = k0 + rb, gcb = col0 + cb;
+            Bs[rb][cb] = (grb < K && gcb < N) ? B[(long long)grb * N + gcb] : 0.0f;
         }
         __syncthreads();
         #pragma unroll
@@ -165,7 +167,7 @@ fn blas(r: cublasStatus_t, what: &str) -> Result<()> {
 /// Compile `src` to PTX for compute capability `cc` (no fast math, no FMA contraction).
 fn compile(src: &str, cc: (i32, i32)) -> Result<CString> {
     let csrc = CString::new(src).unwrap();
-    let name = CString::new("noetic_kernels.cu").unwrap();
+    let name = CString::new("tensor_kernels.cu").unwrap();
     let opts: Vec<CString> = [format!("--gpu-architecture=compute_{}{}", cc.0, cc.1), "--fmad=false".into(), "--std=c++14".into()].into_iter().map(|o| CString::new(o).unwrap()).collect();
     let optp: Vec<*const std::ffi::c_char> = opts.iter().map(|o| o.as_ptr()).collect();
     let mut prog: nvrtcProgram = std::ptr::null_mut();

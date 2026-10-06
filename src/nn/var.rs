@@ -3,13 +3,13 @@
 //! map (`lifted`: every var a fresh `require_grad` leaf), builds the model from the lifted map,
 //! reads the gradients back by var index (`grads`) and an optimizer replaces the untracked vars.
 //!
-//! Save and load are exact to the bit: the format "noetic.nn.v1" stores each var's name, dtype
+//! Save and load are exact to the bit: the format (`FORMAT`) stores each var's name, dtype
 //! (f32, f64, f16 or bf16), shape and the little-endian bytes of its stored values in hex (so
 //! NaN payloads, signalling NaNs of the 16-bit types included, and signed zeros survive),
 //! through serde. f16 and bf16 are storage types: they are read and written as their bit
 //! patterns, never through a conversion.
 
-use crate::error::{Error, Result};
+use crate::error::{NnError, Result};
 use crate::tensor::half::{BF16, F16};
 use crate::tensor::{CpuStorage, DType, Gradients, Tensor};
 use serde::{Deserialize, Serialize};
@@ -70,10 +70,10 @@ impl VarMap {
     pub fn insert(&mut self, name: impl Into<String>, t: Tensor) -> Result<usize> {
         let name = name.into();
         if self.index.contains_key(&name) {
-            return Err(Error::Tensor(format!("var {name:?} already exists")));
+            return Err(NnError::Tensor(format!("var {name:?} already exists")));
         }
         if t.rank() == 0 {
-            return Err(Error::Tensor(format!("var {name:?} has no seed axis")));
+            return Err(NnError::Tensor(format!("var {name:?} has no seed axis")));
         }
         let i = self.names.len();
         self.index.insert(name.clone(), i);
@@ -84,7 +84,7 @@ impl VarMap {
 
     /// Replace var `name` with a tensor of the same shape and dtype.
     pub fn set(&mut self, name: &str, t: Tensor) -> Result<()> {
-        let i = self.index_of(name).ok_or_else(|| Error::Tensor(format!("no var named {name:?}")))?;
+        let i = self.index_of(name).ok_or_else(|| NnError::Tensor(format!("no var named {name:?}")))?;
         self.set_index(i, t)
     }
 
@@ -92,7 +92,7 @@ impl VarMap {
     pub fn set_index(&mut self, i: usize, t: Tensor) -> Result<()> {
         let old = &self.tensors[i];
         if old.shape() != t.shape() || old.dtype() != t.dtype() {
-            return Err(Error::Tensor(format!("var {:?} is {:?} {}, not {:?} {}", self.names[i], old.shape(), old.dtype().name(), t.shape(), t.dtype().name())));
+            return Err(NnError::Tensor(format!("var {:?} is {:?} {}, not {:?} {}", self.names[i], old.shape(), old.dtype().name(), t.shape(), t.dtype().name())));
         }
         self.tensors[i] = t;
         Ok(())
@@ -108,7 +108,7 @@ impl VarMap {
         self.tensors.iter().map(|t| t.shape()[1..].iter().product::<usize>()).sum()
     }
 
-    /// The same vars, each a fresh `require_grad` leaf.
+    /// The same vars, each a fresh `require_grad` leaf .
     pub fn lifted(&self) -> VarMap {
         VarMap { names: self.names.clone(), tensors: self.tensors.iter().map(|t| t.clone().detach().require_grad()).collect(), index: self.index.clone() }
     }
@@ -132,7 +132,7 @@ impl VarMap {
                 DType::F32 => t.to_vec().iter().flat_map(|x| x.to_bits().to_le_bytes()).collect(),
                 DType::F64 => t.to_vec_f64().iter().flat_map(|x| x.to_bits().to_le_bytes()).collect(),
                 DType::F16 | DType::BF16 => half_bits(t).iter().flat_map(|x| x.to_le_bytes()).collect(),
-                other => return Err(Error::Persist(format!("var {name:?}: saving {} vars is not supported", other.name()))),
+                other => return Err(NnError::Persist(format!("var {name:?}: saving {} vars is not supported", other.name()))),
             };
             vars.push(VarRecord { name: name.to_string(), dtype: t.dtype().name().to_string(), shape: t.shape().to_vec(), data: to_hex(&bytes) });
         }
@@ -142,29 +142,29 @@ impl VarMap {
     /// Rebuild from the saved form (on the calling thread's default device).
     pub fn from_file(f: &VarMapFile) -> Result<VarMap> {
         if f.format != FORMAT {
-            return Err(Error::Persist(format!("unknown var map format {:?} (expected {FORMAT:?})", f.format)));
+            return Err(NnError::Persist(format!("unknown var map format {:?} (expected {FORMAT:?})", f.format)));
         }
         let mut map = VarMap::new();
         for r in &f.vars {
             let n: usize = r.shape.iter().product();
-            let bytes = from_hex(&r.data).ok_or_else(|| Error::Persist(format!("var {:?}: malformed data", r.name)))?;
+            let bytes = from_hex(&r.data).ok_or_else(|| NnError::Persist(format!("var {:?}: malformed data", r.name)))?;
             let t = match r.dtype.as_str() {
                 "f32" => {
                     if bytes.len() != 4 * n {
-                        return Err(Error::Persist(format!("var {:?}: {} bytes for {n} f32 values", r.name, bytes.len())));
+                        return Err(NnError::Persist(format!("var {:?}: {} bytes for {n} f32 values", r.name, bytes.len())));
                     }
                     Tensor::from_data(bytes.chunks_exact(4).map(|c| f32::from_bits(u32::from_le_bytes([c[0], c[1], c[2], c[3]]))).collect(), r.shape.clone())
                 }
                 "f64" => {
                     if bytes.len() != 8 * n {
-                        return Err(Error::Persist(format!("var {:?}: {} bytes for {n} f64 values", r.name, bytes.len())));
+                        return Err(NnError::Persist(format!("var {:?}: {} bytes for {n} f64 values", r.name, bytes.len())));
                     }
                     let v: Vec<f64> = bytes.chunks_exact(8).map(|c| f64::from_bits(u64::from_le_bytes(c.try_into().expect("8 bytes")))).collect();
                     Tensor::from_f64s(v, r.shape.clone(), DType::F64)
                 }
                 "f16" | "bf16" => {
                     if bytes.len() != 2 * n {
-                        return Err(Error::Persist(format!("var {:?}: {} bytes for {n} {} values", r.name, bytes.len(), r.dtype)));
+                        return Err(NnError::Persist(format!("var {:?}: {} bytes for {n} {} values", r.name, bytes.len(), r.dtype)));
                     }
                     let b: Vec<u16> = bytes.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
                     if r.dtype == "f16" {
@@ -173,36 +173,36 @@ impl VarMap {
                         Tensor::raw_t(b.into_iter().map(BF16).collect::<Vec<_>>(), r.shape.clone())
                     }
                 }
-                other => return Err(Error::Persist(format!("var {:?}: unknown dtype {other:?}", r.name))),
+                other => return Err(NnError::Persist(format!("var {:?}: unknown dtype {other:?}", r.name))),
             };
-            map.insert(r.name.clone(), t).map_err(|e| Error::Persist(e.message().to_string()))?;
+            map.insert(r.name.clone(), t).map_err(|e| NnError::Persist(e.message().to_string()))?;
         }
         Ok(map)
     }
 
     /// The saved form as JSON.
     pub fn to_json(&self) -> Result<String> {
-        serde_json::to_string(&self.to_file()?).map_err(|e| Error::Persist(format!("var map: {e}")))
+        serde_json::to_string(&self.to_file()?).map_err(|e| NnError::Persist(format!("var map: {e}")))
     }
 
     pub fn from_json(s: &str) -> Result<VarMap> {
-        let f: VarMapFile = serde_json::from_str(s).map_err(|e| Error::Persist(format!("var map: {e}")))?;
+        let f: VarMapFile = serde_json::from_str(s).map_err(|e| NnError::Persist(format!("var map: {e}")))?;
         VarMap::from_file(&f)
     }
 
     pub fn save(&self, path: impl AsRef<std::path::Path>) -> Result<()> {
         let path = path.as_ref();
-        std::fs::write(path, self.to_json()?).map_err(|e| Error::Persist(format!("{}: {e}", path.display())))
+        std::fs::write(path, self.to_json()?).map_err(|e| NnError::Persist(format!("{}: {e}", path.display())))
     }
 
     pub fn load(path: impl AsRef<std::path::Path>) -> Result<VarMap> {
         let path = path.as_ref();
-        let s = std::fs::read_to_string(path).map_err(|e| Error::Persist(format!("{}: {e}", path.display())))?;
+        let s = std::fs::read_to_string(path).map_err(|e| NnError::Persist(format!("{}: {e}", path.display())))?;
         VarMap::from_json(&s)
     }
 }
 
-/// The saved form of a `VarMap` ("noetic.nn.v1").
+/// The saved form of a `VarMap` (`FORMAT`).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VarMapFile {
     pub format: String,

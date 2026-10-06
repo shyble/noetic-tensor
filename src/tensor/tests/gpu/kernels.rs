@@ -1,4 +1,4 @@
-// Device kernels, one set of bodies for every GPU backend: the device sort, the fused Adam
+// Kernels: one set of bodies for every GPU backend: the device sort, the fused Adam
 // update and the large-tile and split-k matmul paths against CpuRef.
 // - sort (`GpuBackend::sort_desc`, a bitonic kernel): values bit-equal to CpuRef's on every lane;
 //   positions equal to CpuRef's wherever a value is unique in its lane (CpuRef gives first-index
@@ -37,11 +37,11 @@ fn body_device_sort_matches_cpu_ref() {
         let x = t(&shape, 11 + dim as u64);
         let (vr, ir) = x.clone().sort_descending_with_indices(dim);
         let xm = x.to(M);
-        let (_, d0, r0) = nt::transfer_counts();
+        let (_, d0, rt0) = nt::transfer_counts();
         let (vm, im) = xm.sort_descending_with_indices(dim);
-        let (_, d1, r1) = nt::transfer_counts();
+        let (_, d1, rt1) = nt::transfer_counts();
         assert_eq!(vm.device(), M);
-        assert_eq!((r1 - r0, d1 - d0), (0, 0), "{shape:?}: no round trip and no read (the positions stay on the device)");
+        assert_eq!((rt1 - rt0, d1 - d0), (0, 0), "{shape:?}: no round trip and no read (the positions stay on the device)");
         let (vv, rv) = (vm.to_vec(), vr.to_vec());
         assert_bits(&format!("sort {shape:?} dim {dim} values"), &vv, &rv);
         // Positions equal CpuRef's for every value that is unique in its lane (random draws can
@@ -91,9 +91,9 @@ fn body_device_sort_matches_cpu_ref() {
     // Lanes past the limit sort on the host, a counted round trip.
     let x = t(&[2, 5000], 4);
     let (vr, _) = x.clone().sort_descending_with_indices(1);
-    let r0 = nt::transfer_counts().2;
+    let rt0 = nt::transfer_counts().2;
     let (vm, _) = x.to(M).sort_descending_with_indices(1);
-    assert_eq!(nt::transfer_counts().2, r0 + 1, "a 5000-long lane goes through the host");
+    assert_eq!(nt::transfer_counts().2, rt0 + 1, "a 5000-long lane goes through the host");
     assert_bits("long lanes", &vm.to_vec(), &vr.to_vec());
     eprintln!("{TAG} sort: ties in first-index order with values equal CpuRef's; topk equal; a 5000-long lane via the host");
 }

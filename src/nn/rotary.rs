@@ -6,17 +6,17 @@
 //! The angles are computed on the host in f64 and stored at the input's dtype; the rotation is
 //! `x·cos + rot(x)·sin` in tensor ops, so it carries gradient.
 
-use crate::error::{Error, Result};
+use crate::error::{NnError, Result};
 use crate::tensor::Tensor;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum RopeStyle {
     #[default]
     RotateHalf,
     Interleaved,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RopeConfig {
     pub base: f64,
     pub style: RopeStyle,
@@ -38,7 +38,7 @@ impl Rope {
     /// RoPE over head width `dh` (even).
     pub fn new(dh: usize, cfg: RopeConfig) -> Result<Rope> {
         if dh == 0 || !dh.is_multiple_of(2) {
-            return Err(Error::Config(format!("RoPE needs an even head width, not {dh}")));
+            return Err(NnError::Config(format!("RoPE needs an even head width, not {dh}")));
         }
         Ok(Rope { dh, cfg })
     }

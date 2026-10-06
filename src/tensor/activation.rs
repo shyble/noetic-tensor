@@ -1,6 +1,7 @@
-//! Activations in their standard formulations: each
+//! Activations in their standard formulations (the standard formulations): each
 //! is one node on the tape with the analytic backward PyTorch uses, computed in the tensor's own
-//! dtype. The forward values of softmax, log_softmax and logsumexp equal burn 0.21's.
+//! dtype. They were first composed exactly as burn 0.21 composes them on
+//! `Autodiff<NdArray>` (the forward values of softmax, log_softmax and logsumexp are unchanged).
 
 use super::autodiff::{attach, record_with_output};
 use super::dtype::FloatElem;

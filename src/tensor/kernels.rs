@@ -1,8 +1,8 @@
 //! Storage-level kernels over contiguous row-major buffers: CpuRef's arithmetic. The order is the
-//! one burn 0.21's NdArray backend used (ndarray 0.17 without BLAS, no SIMD feature):
+//! one burn 0.21's NdArray backend used (ndarray 0.17 without BLAS, no SIMD feature), kept:
 //! elementwise maps are exact IEEE operations; reductions follow ndarray's `sum_axis`
 //! (eight partial sums along the last axis, in-order slice additions along any other axis);
-//! matmul is matrixmultiply's sgemm/dgemm. Argmax propagates NaN and the sort is
+//! matmul is matrixmultiply's sgemm/dgemm. Unlike burn, argmax propagates NaN and the sort is
 //! stable (burn's skipped NaN and used `sort_unstable_by`).
 
 use super::dtype::FloatElem;
@@ -181,7 +181,6 @@ pub(crate) fn sum_all<T: FloatElem>(x: &[T]) -> T {
 /// `argmax` keeping the dimension: the first maximum, NaN-propagating (as PyTorch and
 /// NumPy): the first NaN of a lane is its maximum; otherwise a strictly greater value replaces.
 /// burn 0.21 skipped NaN (it never compares greater), so a lane with NaN reported a number.
-#[allow(clippy::eq_op)] // `x != x` is the generic NaN test.
 pub(crate) fn argmax_dim<T: Copy + PartialOrd>(x: &[T], sh: &[usize], dim: usize) -> (Vec<i64>, Vec<usize>) {
     let mut out_sh = sh.to_vec();
     out_sh[dim] = 1;
@@ -389,7 +388,7 @@ pub(crate) fn sort_order<T: FloatElem>(a: T, b: T) -> std::cmp::Ordering {
 }
 
 pub(crate) fn sort_desc_with_indices<T: FloatElem>(x: &[T], sh: &[usize], dim: usize) -> (Vec<T>, Vec<i64>) {
-    assert!(sh.len() >= 2, "sort needs a rank ≥ 2 tensor");
+    assert!(sh.len() >= 2, "sort needs rank 2 or more");
     let n = sh[dim];
     let outer: usize = sh[..dim].iter().product();
     let inner: usize = sh[dim + 1..].iter().product();

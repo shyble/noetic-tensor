@@ -9,11 +9,10 @@
 //! (`gpu_*` below return None for a CPU tensor, so the CPU path runs unchanged); CpuRef is not
 //! touched. Autodiff stays above storage.
 //!
-//! Forward ops: elementwise ops, comparisons, mask_fill, lane reductions (CpuRef's order:
+//! Coverage (forward): elementwise ops, comparisons, mask_fill, lane reductions (CpuRef's order:
 //! sums equal CpuRef's), batched matmul (matrixmultiply's order), gather, index_select,
-//! one_hot, deterministic scatter_add and index_add, strided copies, casts. Sort (and so topk) runs
-//! on the device where the backend has a sort kernel, else on the host through a counted round
-//! trip. Floats compute in f32 (f16 and bf16 are cast
+//! one_hot, deterministic scatter_add and index_add, strided copies, casts. Sort (and so topk)
+//! runs on the host through a counted round trip. Floats compute in f32 (f16 and bf16 are cast
 //! to f32 first, as on the CPU); F64 is `TensorError::Unsupported` on Metal.
 
 // Without a GPU feature `GpuStorage` is uninhabited, so every GPU branch below is dead code.
@@ -185,7 +184,7 @@ pub(crate) trait GpuBackend: Sync {
     }
     /// The device's provenance key.
     fn key(&self) -> Result<String>;
-    /// nn::Adam's plain update of contiguous f32 `p`, `g`, `m`, `v` (n elements)
+    /// Optional: nn::Adam's plain update of contiguous f32 `p`, `g`, `m`, `v` (n elements)
     /// fused into one kernel with the op sequence's f32 arithmetic; returns (p, m, v). The default
     /// is Unsupported: the caller runs the op sequence.
     fn adam_update(&self, p: &GpuStorage, g: &GpuStorage, m: &GpuStorage, v: &GpuStorage, n: usize, s: &AdamScalars) -> Result<(GpuStorage, GpuStorage, GpuStorage)> {
@@ -286,7 +285,7 @@ pub(crate) fn place(storage: &std::sync::Arc<Storage>, device: Device) -> Result
                 return Err(TensorError::Unsupported("f64 tensors cannot live on Metal (Metal has no f64); cast to f32 first".into()));
             }
             if host.dtype() == DType::F64 && matches!(d, Device::Cuda(_)) {
-                return Err(TensorError::Unsupported("f64 tensors on CUDA are not in the CUDA kernel set; cast to f32 first".into()));
+                return Err(TensorError::Unsupported("f64 tensors are not supported on CUDA; cast to f32 first".into()));
             }
             let g = backend_for(d)?.upload(d, &host)?;
             UPLOADS.fetch_add(1, Ordering::Relaxed);
@@ -614,11 +613,11 @@ pub(crate) fn gpu_slice_assign(t: &Tensor, ranges: &[std::ops::Range<usize>], va
 
 /// cat along `dim` (every part on the same GPU, one float dtype).
 pub(crate) fn gpu_cat(parts: &[Tensor], dim: usize) -> Option<(Storage, Vec<usize>)> {
-    let g0 = gpu_of(&parts[0].storage)?;
+    let first = gpu_of(&parts[0].storage)?;
     let mut out_sh = parts[0].layout.shape.clone();
     out_sh[dim] = parts.iter().map(|p| p.layout.shape[dim]).sum();
     let st = ok((|| {
-        let out = be(g0).alloc(g0.device, DType::F32, out_sh.iter().product())?;
+        let out = be(first).alloc(first.device, DType::F32, out_sh.iter().product())?;
         let base = Layout::contiguous(out_sh.clone());
         let mut at = 0;
         for p in parts {
@@ -627,7 +626,7 @@ pub(crate) fn gpu_cat(parts: &[Tensor], dim: usize) -> Option<(Storage, Vec<usiz
             let mut r: Vec<std::ops::Range<usize>> = out_sh.iter().map(|&d| 0..d).collect();
             r[dim] = at..at + p.layout.shape[dim];
             at += p.layout.shape[dim];
-            be(g0).write(&out, &base.narrowed(&r), &v, &vl)?;
+            be(first).write(&out, &base.narrowed(&r), &v, &vl)?;
         }
         Ok(out)
     })());
@@ -667,7 +666,7 @@ pub(crate) fn gpu_adam(p: &Tensor, g: &Tensor, m: &Tensor, v: &Tensor, s: &AdamS
     }
 }
 
-/// The provenance key of a GPU device (its name and the kernel options), e.g. for logs.
+/// The provenance key of a GPU device (its name and the kernel options), e.g. for run records.
 pub fn gpu_key(device: Device) -> Result<String> {
     backend_for(device)?.key()
 }

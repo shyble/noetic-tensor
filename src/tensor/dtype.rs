@@ -1,6 +1,6 @@
 //! Element types: the runtime `DType`, the `Element` trait that ties a Rust type
 //! to its dtype and storage variant, and `FloatElem`, the float types the kernels compute in
-//! (f32, f64). The dtypes: F32, F64, I64, I32, U8, F16 and BF16.
+//! (f32, f64). Dtypes: F32, F64, F16, BF16, I64, I32, U8 and Bool.
 
 use super::half::{BF16, F16};
 use super::storage::CpuStorage;

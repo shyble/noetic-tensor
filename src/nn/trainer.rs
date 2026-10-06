@@ -1,7 +1,6 @@
 //! One training step on any decoder configuration: the masked per-seed
 //! cross-entropy, plus the MoE blocks' auxiliary losses at their weights, at a training step
-//! (dropout masks of that step, MoE capacity), and one optimizer step. At a configuration
-//! without dropout or MoE it is the plain step (loss, backward, optimizer step), to the bit.
+//! (dropout masks of that step, MoE capacity), and one optimizer step.
 
 use super::decoder::{Decoder, DecoderConfig, ForwardOptions};
 use super::loss::masked_cross_entropy;

@@ -55,12 +55,12 @@ fn seed_independence() {
         let loss = next_token_loss(lg.clone(), &tk, &IntTensor::from_data(next, [s, b]));
         (lg.to_vec(), lifted.grads(&loss.sum().backward()))
     };
-    let (l3, g3) = run(&three, toks.clone(), next.clone(), 3);
-    let (l1, g1) = run(&one, toks[b * t..2 * b * t].to_vec(), next[b..2 * b].to_vec(), 1);
+    let (l3, gc) = run(&three, toks.clone(), next.clone(), 3);
+    let (l1, ga) = run(&one, toks[b * t..2 * b * t].to_vec(), next[b..2 * b].to_vec(), 1);
     let per = b * t * v;
     assert_bits("logits of seed 1", &l3[per..2 * per], &l1);
     for (i, name) in three.names().iter().enumerate() {
-        let (a, c) = (g3[i].as_ref().unwrap(), g1[i].as_ref().unwrap());
+        let (a, c) = (gc[i].as_ref().unwrap(), ga[i].as_ref().unwrap());
         assert_bits(&format!("gradient {name} of seed 1"), &slot(a, 1, 3), &c.to_vec());
     }
 }
@@ -91,7 +91,7 @@ fn save_load_save_is_exact() {
     }
     assert_eq!(back.to_json().unwrap(), json, "save → load → save");
     // Through a file, and the loaded model computes the same logits.
-    let path = std::env::temp_dir().join(format!("noetic-nn-varmap-{}.json", std::process::id()));
+    let path = std::env::temp_dir().join(format!("nn-varmap-{}.json", std::process::id()));
     let (_, clean) = Decoder::init(small(32), 3, 17).unwrap();
     clean.save(&path).unwrap();
     let loaded = VarMap::load(&path).unwrap();
@@ -99,7 +99,7 @@ fn save_load_save_is_exact() {
     let toks = IntTensor::from_data(rnd_ints(3 * 2 * 16, 5, 32), [3, 2, 16]);
     assert_bits("logits after load", &Decoder::load(small(32), &loaded).unwrap().forward(&toks).to_vec(), &dec.forward(&toks).to_vec());
     let mut bad = clean.to_file().unwrap();
-    bad.format = "noetic.nn.v0".into();
+    bad.format = "unknown.v0".into();
     assert!(VarMap::from_file(&bad).is_err());
 }
 
@@ -115,11 +115,11 @@ fn gather_embedding_equals_one_hot() {
         let g = (y.clone() * w.clone()).sum().backward();
         (y.to_vec(), t.grad(&g).unwrap().to_vec())
     };
-    let (y1, g1) = run(EmbeddingMode::OneHot);
-    let (y2, g2) = run(EmbeddingMode::Gather);
+    let (y1, ga) = run(EmbeddingMode::OneHot);
+    let (y2, gb) = run(EmbeddingMode::Gather);
     assert_bits("gather forward", &y2, &y1);
-    let (g1, g2): (Vec<f64>, Vec<f64>) = (g1.iter().map(|x| *x as f64).collect(), g2.iter().map(|x| *x as f64).collect());
-    assert_close("gather gradient", &g2, &g1, 1e-6);
+    let (ga, gb): (Vec<f64>, Vec<f64>) = (ga.iter().map(|x| *x as f64).collect(), gb.iter().map(|x| *x as f64).collect());
+    assert_close("gather gradient", &gb, &ga, 1e-6);
 }
 
 /// Linear warmup over the first 1% of steps, then cosine decay to 10% at the end, written out.

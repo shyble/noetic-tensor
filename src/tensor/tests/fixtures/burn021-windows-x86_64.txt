@@ -1,8 +1,7 @@
-# burn 0.21 outputs, recorded once from burn itself on Windows (x86_64-pc-windows-msvc): the values the parity tests
-# compare bit for bit with the per-op results, taken from the burn side of each comparison
-# (Autodiff<NdArray<f32>>, and NdArray<f64>). Operations whose numerics were later changed to the
-# standard formulations are not recorded here; their gradients are checked against f64 and finite
-# differences (tests::standard).
+# burn 0.21 outputs, recorded from burn itself on Windows (x86_64): the values the per-op parity tests
+# compare bit for bit (from the burn side of each comparison: NdArray<f32>, Autodiff<NdArray<f32>>,
+# and NdArray<f64> run alone as the first backend of its process). Only the records of this
+# crate's tests are kept. TENSOR_FIXTURE_RECORD=FILE appends records instead of checking them.
 # key (test::label[#occurrence])	element type	count	sha256 of the little-endian bits
 tensor::tests::checks::softmax_of_nan_and_fully_masked_rows_is_burns::log_softmax with NaN / all −inf	f32	12	207a64925a70a42fb0a6ddc24f198ccca94bb4d2d1107a9020f6c275b7b1f25e
 tensor::tests::checks::softmax_of_nan_and_fully_masked_rows_is_burns::softmax with NaN / all −inf	f32	12	46094fdbcbd756ed726a9f023a03781bd2526981e5a5715bafd8f19fdc6e1dfc

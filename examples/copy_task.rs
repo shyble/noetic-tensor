@@ -4,11 +4,11 @@
 //! `cargo run --release --example copy_task` (add `--features metal` or `--features cuda` and
 //! pass `metal` or `cuda` to train on the GPU).
 
-use noetic_tensor::nn::{train_step, Adam, AdamConfig, AuxWeights, Decoder, DecoderConfig, ParamGroups, VarMap};
-use noetic_tensor::tensor::{set_default_device, CpuMode, Device, IntTensor, Tensor};
+use noetic::nn::{train_step, Adam, AdamConfig, AuxWeights, Decoder, DecoderConfig, ParamGroups, VarMap};
+use noetic::tensor::{set_default_device, CpuMode, Device, IntTensor, Tensor};
 use rand::{Rng, SeedableRng};
 
-fn main() -> noetic_tensor::Result<()> {
+fn main() -> noetic::Result<()> {
     let device = match std::env::args().nth(1).as_deref() {
         Some("metal") => Device::Metal(0),
         Some("cuda") => Device::Cuda(0),

@@ -6,7 +6,7 @@ fn main() {
     let rustc = std::env::var("RUSTC").unwrap_or_else(|_| "rustc".into());
     let v = std::process::Command::new(rustc).arg("--version").output().ok().and_then(|o| String::from_utf8(o.stdout).ok()).unwrap_or_default();
     let v = v.split_whitespace().take(2).collect::<Vec<_>>().join(" ");
-    println!("cargo:rustc-env=NOETIC_RUSTC={}", if v.is_empty() { "unknown".into() } else { v });
+    println!("cargo:rustc-env=TENSOR_BUILD_RUSTC={}", if v.is_empty() { "unknown".into() } else { v });
     if std::env::var_os("CARGO_FEATURE_METAL").is_some() && std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
         println!("cargo:rustc-link-lib=framework=Metal");
         println!("cargo:rustc-link-lib=framework=Foundation");

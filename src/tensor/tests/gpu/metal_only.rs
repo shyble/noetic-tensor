@@ -1,4 +1,4 @@
-// Metal-only tests: the raw device's latency table, the tuned matmul variants
+// Metal-only tests: the raw kernels' latency table, the tuned matmul variants
 // (every variant bit-equal to CpuRef on every layout) and their benchmark, and a CPU-side
 // fact the sort tests rely on (CpuRef's tie order by lane length). Included by gpu/mod.rs.
 

@@ -28,7 +28,7 @@ Most frameworks treat run-to-run variation as noise you live with. noetic-tensor
 
 It suits research code whose results must be rebuilt exactly, experiments that run many seeds of a small model, and anyone who wants to see how a framework works from the tensor up.
 
-noetic-tensor is the numerical engine of Noetic. This repository is a snapshot of that engine, taken in October 2026.
+This repository is the engine's single source: releases are tagged here, starting with 0.2.0. This crate is the tensor and neural-network engine only; it contains none of Noetic's methods. The library is imported as `use noetic::tensor::…` and `use noetic::nn::…` (the package name stays noetic-tensor).
 
 ## Using it
 
@@ -43,8 +43,8 @@ noetic-tensor = { git = "https://github.com/shyble/noetic-tensor" }
 A small decoder, four models at once:
 
 ```rust
-use noetic_tensor::nn::{cross_entropy, Decoder, DecoderConfig};
-use noetic_tensor::tensor::IntTensor;
+use noetic::nn::{cross_entropy, Decoder, DecoderConfig};
+use noetic::tensor::IntTensor;
 
 // vocab 16, width 32, 4 heads, context 8, 2 blocks, MLP width 64; 4 seeds from root 1.
 let cfg = DecoderConfig::new(16, 32, 4, 8, 2, 64);
@@ -53,7 +53,7 @@ let tokens = IntTensor::from_data(vec![1; 4 * 2 * 8], [4, 2, 8]); // [seeds, bat
 let logits = model.forward(&tokens);                               // [4, 2, 8, 16]
 let loss = cross_entropy(logits, &tokens);                         // one loss per seed, [4]
 assert_eq!(loss.shape(), &[4]);
-# Ok::<(), noetic_tensor::Error>(())
+# Ok::<(), noetic::Error>(())
 ```
 
 ## What is in it
@@ -62,16 +62,16 @@ assert_eq!(loss.shape(), &[4]);
 - Float, int and bool tensors: F32, F64, F16 and BF16 storage (16-bit types compute in f32), I64, I32 and U8.
 - Views (reshape, swap_dims, slice, expand), broadcasting, batched matmul, reductions, indexing, gather (with a scatter-add backward), sort, argmax.
 - A tape-based reverse-mode autodiff.
-- A panicking API and a fallible `try_*` twin for every check.
+- A panicking API and a fallible `try_*` counterpart for every check.
 - Devices:
   - `Cpu(Reference)`: deterministic reference kernels.
-  - `Cpu(Fast)`: scoped threads and SIMD.
+  - `Cpu(Fast)`: worker threads and SIMD.
   - `Metal(i)`: feature `metal`, macOS only.
   - `Cuda(i)`: feature `cuda`. Uses the driver API, NVRTC and cuBLAS.
 
 **`nn`**, structured like candle-nn:
 - Layers: linear, embedding (one-hot or gather), multi-head and grouped-query attention, RoPE, a KV cache, RMSNorm and LayerNorm, gated (SwiGLU) and plain MLPs, mixture of experts, dropout.
-- A pre-norm decoder.
+- A pre-norm decoder. Its gated MLP takes an optional caller-supplied extension (`MlpExtension`) that may add vars and transform the gate's pre-activation and the hidden activations.
 - Losses.
 - Optimizers: Adam and AdamW (both decay orders), SGD, EMA, learning-rate schedules, gradient clipping.
 - `VarMap`: save and load, exact to the bit.
@@ -86,7 +86,7 @@ cargo run --release --features metal --example copy_task metal
 ```
 
 ```rust
-use noetic_tensor::tensor::Tensor;
+use noetic::tensor::Tensor;
 
 let x = Tensor::from_data(vec![1.0, 2.0, 3.0, 4.0], [2, 2]).require_grad();
 let y = (x.clone().matmul(x.clone()) * 2.0).sum();
@@ -127,4 +127,4 @@ The reference kernels were first written to reproduce [burn](https://github.com/
 
 ## Licence
 
-MIT or Apache-2.0, at your option.
+MIT or Apache-2.0, at your option (LICENSE-MIT, LICENSE-APACHE).

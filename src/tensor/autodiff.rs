@@ -1,5 +1,5 @@
-//! Reverse-mode autodiff. The traversal is burn-autodiff 0.21's (a valid topological
-//! order; changing it would only reorder gradient sums).
+//! Reverse-mode autodiff. The traversal is burn-autodiff 0.21's (kept: a valid
+//! topological order, and changing it would only reorder gradient sums).
 //!
 //! Every float operation gives its output an `order` of 1 + the largest order of its float
 //! inputs (tracked or not); fresh tensors, int/bool conversions and `detach` start at 0, and a
@@ -168,7 +168,7 @@ pub(crate) fn run_backward(root: &Tensor) -> Gradients {
     for level in tape.into_iter().rev() {
         for node in level {
             let Some(backward) = &node.backward else { continue }; // a leaf: its gradient stays
-            let grad = grads.remove(&node.id).expect("a node's gradient is registered before its step runs");
+            let grad = grads.remove(&node.id).expect("a node's gradient is recorded before its step runs");
             let needs: Vec<bool> = node.inputs.iter().map(|i| i.is_some()).collect();
             let outs = backward(grad, &needs);
             for (input, g) in node.inputs.iter().zip(outs) {

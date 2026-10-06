@@ -1,9 +1,9 @@
-//! Multi-head and grouped-query self-attention. The residual stream is the seed-batched token layout `[S, B·T, d]`; heads
+//! Multi-head and grouped-query self-attention, in a fixed layout and operation order. The residual stream is the seed-batched token layout `[S, B·T, d]`; heads
 //! split as `[S·B, T, H, dh] → swap → [S·B·H, T, dh]`; scores are `q · kᵀ` then scaled by 1/√dh
 //! (the scale after the product); the future is filled with −∞ and the
 //! softmax is the tensor core's; heads merge back and `wo` projects.
 //!
-//! Options, each adding operations only when used:
+//! Options, each adding operations only when used (so the default sequence is unchanged):
 //! - grouped-query attention: `kv_heads` < `heads` key/value heads, each shared by
 //!   `heads / kv_heads` query heads (query head h reads key head h / group);
 //! - RoPE on queries and keys (at absolute positions, also under the KV-cache);
@@ -15,7 +15,7 @@ use super::linear::{linear, Linear};
 use super::module::Module;
 use super::rotary::{Rope, RopeConfig};
 use super::var_builder::VarBuilder;
-use crate::error::{Error, Result};
+use crate::error::{NnError, Result};
 use super::kv_cache::KvCache;
 use crate::tensor::{softmax, BoolTensor, Tensor};
 
@@ -186,10 +186,10 @@ pub fn causal_attention(d: usize, heads: usize, vb: &VarBuilder) -> Result<Multi
 pub fn attention(cfg: AttentionConfig, vb: &VarBuilder) -> Result<MultiHeadAttention> {
     let (d, heads, kvh) = (cfg.d, cfg.heads, cfg.kv_heads);
     if heads == 0 || !d.is_multiple_of(heads) {
-        return Err(Error::Config(format!("d = {d} must divide into {heads} heads")));
+        return Err(NnError::Config(format!("d = {d} must divide into {heads} heads")));
     }
     if kvh == 0 || !heads.is_multiple_of(kvh) {
-        return Err(Error::Config(format!("{heads} heads do not group into {kvh} key/value heads")));
+        return Err(NnError::Config(format!("{heads} heads do not group into {kvh} key/value heads")));
     }
     let dh = d / heads;
     let rope = cfg.rope.map(|r| Rope::new(dh, r)).transpose()?;

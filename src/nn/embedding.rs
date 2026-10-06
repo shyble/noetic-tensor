@@ -1,5 +1,5 @@
 //! `Embedding`: a table `[S, V, d]` read at token ids `[S, N]`.
-//! - `OneHot`: `one_hot(ids) · table` (the default). Its gradient
+//! - `OneHot`: `one_hot(ids) · table`, the default embedding (its exact mode). Its gradient
 //!   is the matmul's, `one_hotᵀ · g`.
 //! - `Gather`: `gather` of the rows, O(N·d) instead of O(N·V·d). Its values equal OneHot's; its
 //!   gradient is a scatter-add, which can differ from the matmul's in the last bits when a row
@@ -10,7 +10,7 @@ use super::var_builder::VarBuilder;
 use crate::error::Result;
 use crate::tensor::{IntTensor, Tensor};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum EmbeddingMode {
     #[default]
     OneHot,

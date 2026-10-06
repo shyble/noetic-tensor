@@ -150,7 +150,7 @@ fn moe_matches_naive_and_finite_differences() {
 fn moe_capacity_seed_independence_and_determinism() {
     let cfg = mcfg(4, 2, true, Some(0.5));
     let (m3, _) = moe_vars(cfg, &[0, 1, 2], DType::F32, 11);
-    let (m1, _) = moe_vars(cfg, &[1], DType::F32, 11);
+    let (one_vars, _) = moe_vars(cfg, &[1], DType::F32, 11);
     let (s, n, d) = (3, 16, 8);
     let x = rnd(s * n * d, 12, -1.0, 1.0);
     for train in [false, true] {
@@ -158,7 +158,7 @@ fn moe_capacity_seed_independence_and_determinism() {
         let b = m3.forward_moe(&t32(x.clone(), &[s, n, d]), train);
         assert_bits("determinism", &a.y.to_vec(), &b.y.to_vec());
         assert_eq!((&a.load, &a.dropped), (&b.load, &b.dropped));
-        let one = m1.forward_moe(&t32(x[n * d..2 * n * d].to_vec(), &[1, n, d]), train);
+        let one = one_vars.forward_moe(&t32(x[n * d..2 * n * d].to_vec(), &[1, n, d]), train);
         assert_bits(&format!("seed 1 alone (train {train})"), &a.y.to_vec()[n * d..2 * n * d], &one.y.to_vec());
         assert_bits("balance of seed 1", &a.balance.to_vec()[1..2], &one.balance.to_vec());
         assert_eq!(a.load[1], one.load[0]);

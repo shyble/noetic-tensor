@@ -1,4 +1,4 @@
-// Tensor ops, one set of bodies for every GPU backend: tensor ops on the device against
+// Ops: one set of bodies for every GPU backend: tensor ops on the device against
 // CpuRef. Bit-exact for copies, views, masks, comparisons, elementwise ops without
 // transcendentals, the reductions (CpuRef's order), matmul (matrixmultiply's order, also past one
 // k block), indexing and casts; exp, ln, sqrt, pow and sigmoid within 4 ulp. The reference pin
@@ -151,7 +151,7 @@ fn body_sort_and_topk_on_the_device() {
     let (vr, ir) = x.clone().topk_with_indices(3, 1);
     let before = nt::transfer_counts().2;
     let (vm, im) = x.to(M).topk_with_indices(3, 1);
-    // The sort now runs on the device (no host round trip).
+    // The sort runs on the device (no host round trip).
     assert_eq!(nt::transfer_counts().2, before, "the sort runs on the device");
     assert_eq!(vm.device(), M);
     assert_bits("topk values", &vm.to_vec(), &vr.to_vec());

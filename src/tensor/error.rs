@@ -33,9 +33,9 @@ impl std::fmt::Display for TensorError {
 
 impl std::error::Error for TensorError {}
 
-impl From<TensorError> for crate::Error {
+impl From<TensorError> for crate::NnError {
     fn from(e: TensorError) -> Self {
-        crate::Error::Tensor(e.message().to_string())
+        crate::NnError::Tensor(e.message().to_string())
     }
 }
 

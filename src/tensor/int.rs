@@ -210,7 +210,8 @@ impl IntTensor {
     /// the rows are written by a kernel from the uploaded ids, on the CPU this is
     /// `one_hot(n).float_dtype(dtype)` moved to `device`.
     #[track_caller]
-    pub(crate) fn one_hot_float(self, n: usize, dtype: DType, device: super::Device) -> Tensor {
+    #[doc(hidden)]
+    pub fn one_hot_float(self, n: usize, dtype: DType, device: super::Device) -> Tensor {
         if matches!(device, super::Device::Metal(_) | super::Device::Cuda(_)) && dtype != DType::F64 {
             ok(infer::one_hot(&self.data(), n));
             let mut sh = self.layout.shape.clone();

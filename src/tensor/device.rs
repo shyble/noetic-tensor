@@ -1,10 +1,9 @@
-//! Devices. `Cpu(Reference)` runs the reference kernels (bit-exact
-//! and deterministic, in the standard formulations);
-//! `Cpu(Fast)` runs the same operations with threads (std::thread::scope)
-//! and SIMD (std::arch), checked against Reference within a tolerance. `Metal` and `Cuda`
-//! need their feature; without it, selecting them is `TensorError::Unsupported`.
+//! Devices. `Cpu(Reference)` runs the reference kernels (the bit-exact numerics: the standard
+//! formulations); `Cpu(Fast)` runs the same operations with threads and SIMD (std::arch),
+//! checked against Reference within a tolerance. Metal and Cuda need their cargo feature:
+//! without it, selecting them is `TensorError::Unsupported`.
 //!
-//! A process-level pin keeps reproducible runs on Reference: after `pin_reference()`, Fast, Metal
+//! A process-level pin keeps a run on Reference: after `pin_reference()`, Fast, Metal
 //! and Cuda can never be selected (the default device and every `to` refuse them), and a pinned
 //! process never initialises a GPU.
 
@@ -13,7 +12,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub enum CpuMode {
-    /// The reference numerics: bit-exact and deterministic, in the standard formulations.
+    /// The reference numerics (burn 0.21's bit for bit at first; the standard formulations now).
     #[default]
     Reference,
     /// Threads and SIMD; equal to Reference within a per-op tolerance.
@@ -40,7 +39,7 @@ thread_local! {
     static DEFAULT: std::cell::Cell<Device> = const { std::cell::Cell::new(Device::Cpu(CpuMode::Reference)) };
 }
 
-/// Pin this process to the Reference backend (for bit-exact runs): Fast can no longer be selected,
+/// Pin this process to the Reference backend: Fast can no longer be selected,
 /// and a Fast default already set falls back to Reference.
 pub fn pin_reference() {
     PINNED.store(true, Ordering::SeqCst);
@@ -97,5 +96,5 @@ pub fn platform_key() -> String {
             Vec::new()
         }
     };
-    format!("{}-{}-{}-{}-matrixmultiply-0.3.11", std::env::consts::OS, std::env::consts::ARCH, if features.is_empty() { "none".into() } else { features.join("+") }, env!("NOETIC_RUSTC").replace(' ', "_"))
+    format!("{}-{}-{}-{}-matrixmultiply-0.3.11", std::env::consts::OS, std::env::consts::ARCH, if features.is_empty() { "none".into() } else { features.join("+") }, env!("TENSOR_BUILD_RUSTC").replace(' ', "_"))
 }

@@ -1,5 +1,5 @@
-//! `Linear`: `x · W (+ b)` with the weight in the `[S, in, out]` layout (not candle's
-//! `[out, in]`), so the product is `x.matmul(w)` with no transpose. On the
+//! `Linear`: `x · W (+ b)` with the weight in the seed-batched `[S, in, out]` layout (not
+//! candle's `[out, in]`), so the product is `x.matmul(w)` with no transpose. On the
 //! seed-batched token layout `[S, N, in]` it is exactly one matmul (and one add with a bias).
 
 use super::init::Init;
@@ -58,7 +58,7 @@ impl Module for Linear {
     }
 }
 
-/// A linear layer named `name` (the weight var) with the init N(0, 1/in) and no bias.
+/// A linear layer named `name` (the weight var) with the default init, N(0, 1/in), and no bias.
 pub fn linear(in_dim: usize, out_dim: usize, name: &str, vb: &VarBuilder) -> Result<Linear> {
     linear_init(in_dim, out_dim, name, Init::fan_in(in_dim), vb)
 }

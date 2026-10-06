@@ -305,7 +305,7 @@ __device__ const uint LOG_T_LO[128] = {0x00000000u, 0x2f70215cu, 0xae395a38u, 0x
 #define LN2_LO2 __uint_as_float(0x29779abdu)
 
 // ---------------------------------------------------------------- f32 exp, ln and pow
-// Our own f32 implementations: table-driven range reduction and short
+// Our own f32 implementations: range reduction by lookup tables and short
 // polynomials evaluated in float-float (pairs hi + lo) with explicit fmaf, compiled with
 // --fmad=false and no fast math, so every operation rounds as written and results are
 // deterministic. The float-float value carries about 2^-40 relative error, so the final rounding
@@ -651,8 +651,8 @@ extern "C" __global__ void max_all_f32(const float* __restrict__ x, float* __res
     y[0] = a;
 }
 
-// The first maximum along the lane, its index and value, NaN-propagating as CpuRef's argmax
-//: the first NaN is the maximum; otherwise a strictly greater value replaces.
+// The first maximum along the lane, its index and value, NaN-propagating as CpuRef's argmax:
+// the first NaN is the maximum; otherwise a strictly greater value replaces.
 extern "C" __global__ void argmax_dim_f32(const float* __restrict__ x, uint* __restrict__ idx, float* __restrict__ val, Lanes p) {
     uint t = TID;
     if (t >= p.outer * p.inner) return;
@@ -724,7 +724,7 @@ extern "C" __global__ void index_add_f32(const uint* __restrict__ idx, const flo
 
 __device__ __forceinline__ uint total_key(float v) {
     // Every NaN, whatever its sign and payload, is one key above +inf (CpuRef's sort_order;
-    // before, a sign-bit NaN keyed below −inf, and 0xFFFFFFFF collided with the padding key 0).
+    // an earlier key put a sign-bit NaN below −inf, and 0xFFFFFFFF collided with the padding key 0).
     if (isnan(v)) return 0xffffffffu;
     uint b = __float_as_uint(v);
     return (b & 0x80000000u) ? ~b : (b | 0x80000000u);

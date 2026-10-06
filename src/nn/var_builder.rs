@@ -5,12 +5,12 @@
 //! dtype come only from here: components never choose them.
 //!
 //! Names are dotted paths: `vb.pp("b1").get(.., "wq", ..)` is the var "b1.wq"; an empty prefix
-//! adds nothing (so `BlockNaming::Compact`'s block 0 has unprefixed names).
+//! adds nothing (so an unprefixed block keeps plain names).
 
 use super::init::Init;
 use super::var::VarMap;
-use crate::error::{Error, Result};
-use crate::tensor::{DType, Device, Tensor};
+use crate::error::{NnError, Result};
+use crate::tensor::{default_device, DType, Device, Tensor};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -29,19 +29,20 @@ pub struct VarBuilder<'a> {
 }
 
 impl<'a> VarBuilder<'a> {
-    /// Create vars into `map` for seeds 0..`seeds` from `root` (F32, Cpu(Reference)).
+    /// Create vars into `map` for seeds 0..`seeds` from `root` (F32, on the thread's default
+    /// device).
     pub fn init(map: &'a RefCell<VarMap>, seeds: usize, root: u64) -> Self {
         Self::init_indexed(map, &(0..seeds).collect::<Vec<_>>(), root)
     }
 
-    /// As `init`, with slot j initialised as seed `indices[j]`.
+    /// As `init`, with slot j initialised as seed `indices[j]` (paired grids reuse indices).
     pub fn init_indexed(map: &'a RefCell<VarMap>, indices: &[usize], root: u64) -> Self {
-        VarBuilder { src: Source::Init { map, indices: indices.into(), root }, prefix: String::new(), dtype: DType::F32, device: Device::default() }
+        VarBuilder { src: Source::Init { map, indices: indices.into(), root }, prefix: String::new(), dtype: DType::F32, device: default_device() }
     }
 
     /// Read the vars of `map` (a loaded or lifted map); dtype and device are the map's.
     pub fn from_varmap(map: &'a VarMap) -> Self {
-        let (dtype, device) = map.tensors().first().map(|t| (t.dtype(), t.device())).unwrap_or((DType::F32, Device::default()));
+        let (dtype, device) = map.tensors().first().map(|t| (t.dtype(), t.device())).unwrap_or((DType::F32, default_device()));
         VarBuilder { src: Source::Load { map }, prefix: String::new(), dtype, device }
     }
 
@@ -96,12 +97,12 @@ impl<'a> VarBuilder<'a> {
         let want: Vec<usize> = std::iter::once(self.seeds()).chain(shape.iter().copied()).collect();
         let check = |t: &Tensor| -> Result<Tensor> {
             if t.shape() != want.as_slice() {
-                return Err(Error::Tensor(format!("var {full:?} is {:?}, the model asks for {want:?}", t.shape())));
+                return Err(NnError::Tensor(format!("var {full:?} is {:?}, the model asks for {want:?}", t.shape())));
             }
             Ok(t.clone())
         };
         match &self.src {
-            Source::Load { map } => check(map.get(&full).ok_or_else(|| Error::Tensor(format!("no var named {full:?}")))?),
+            Source::Load { map } => check(map.get(&full).ok_or_else(|| NnError::Tensor(format!("no var named {full:?}")))?),
             Source::Init { map, indices, root } => {
                 if let Some(t) = map.borrow().get(&full) {
                     return check(t);
@@ -115,7 +116,7 @@ impl<'a> VarBuilder<'a> {
                     DType::F32 | DType::F64 => Tensor::from_f64s(vals, want.clone(), self.dtype),
                     // Storage-only types: drawn in f32, stored rounded to nearest even.
                     DType::F16 | DType::BF16 => Tensor::from_f64s(vals, want.clone(), DType::F32).cast(self.dtype),
-                    other => return Err(Error::Tensor(format!("var {full:?}: vars are float, not {}", other.name()))),
+                    other => return Err(NnError::Tensor(format!("var {full:?}: vars are float, not {}", other.name()))),
                 };
                 let t = t.try_to(self.device)?;
                 map.borrow_mut().insert(full, t.clone())?;

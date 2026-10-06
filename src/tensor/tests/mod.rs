@@ -69,7 +69,7 @@ pub(crate) fn check2<const D1: usize, const D2: usize>(name: &str, s1: [usize; D
 }
 
 /// The forward values only, against the recorded reference: for operations whose backward
-/// differs from burn's (their gradients are checked in `standard` against f64 and finite
+/// changed from burn's (their gradients are checked in `standard` against f64 and finite
 /// differences instead).
 pub(crate) fn check1_fwd<const DI: usize>(name: &str, shape: [usize; DI], x: &[f32], ours: impl Fn(Tensor) -> Tensor) {
     fixture::f32s(&format!("{name} forward"), ours(Tensor::from_data(x.to_vec(), shape)).as_slice());
@@ -85,8 +85,8 @@ pub(crate) fn our_ints<const D: usize>(v: &[i64], shape: [usize; D]) -> IntTenso
 }
 
 /// Run every ignored test whose name contains `filter` in one fresh process, sequentially: the
-/// reference pin is process-wide, and a test that pins the shared test process makes Metal and
-/// CUDA refuse.
+/// reference pin is process-wide, and any library test that pins the reference backend pins the
+/// shared test process, after which Metal and CUDA are refused.
 #[cfg(any(all(feature = "metal", target_os = "macos"), feature = "cuda"))]
 pub(crate) fn isolated_bodies(filter: &str, expect: usize) {
     let out = std::process::Command::new(std::env::current_exe().expect("the test binary"))

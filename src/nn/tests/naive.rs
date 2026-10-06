@@ -1,6 +1,7 @@
 //! Naive f64 references per component: plain loops over the definitions, compared with the nn
-//! components built in F64. Every component computes in f64 (the sigmoid too), so all are
-//! checked at 1e-12.
+//! components built in F64. Every component computes in f64 (the sigmoid too; burn's
+//! evaluated in f32 for every dtype, and the gated MLP and the decoder were checked at 1e-6), so
+//! all are checked at 1e-12.
 
 use super::*;
 use crate::nn::*;
@@ -60,10 +61,13 @@ fn silu(z: f64) -> f64 {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn gated(x: &[f64], d: usize, m: usize, w_in: &[f64], w_gate: &[f64], w_out: &[f64]) -> Vec<f64> {
+fn gated(x: &[f64], d: usize, m: usize, w_in: &[f64], w_gate: &[f64], w_out: &[f64], shift: Option<&[f64]>, scale: Option<&[f64]>) -> Vec<f64> {
     let n = x.len() / d;
     let (a, g) = (mm(x, n, d, w_in, m), mm(x, n, d, w_gate, m));
-    let hdn: Vec<f64> = (0..n * m).map(|i| a[i] * silu(g[i])).collect();
+    let hdn: Vec<f64> = (0..n * m).map(|i| {
+        let u = i % m;
+        a[i] * silu(g[i] + shift.map_or(0.0, |b| b[u])) * scale.map_or(1.0, |k| k[u])
+    }).collect();
     mm(&hdn, n, m, w_out, d)
 }
 
@@ -118,10 +122,13 @@ fn gated_mlp_matches_naive() {
     let (s, n, d, m) = (2, 6, 4, 7);
     let x = rnd(s * n * d, 20, -1.0, 1.0);
     let (wi, wg, wo) = (rnd(s * d * m, 21, -1.0, 1.0), rnd(s * d * m, 22, -1.0, 1.0), rnd(s * m * d, 23, -1.0, 1.0));
+    let shift = rnd(s * m, 24, -0.5, 0.5);
+    let scale = rnd(s * m, 25, 0.0, 1.5);
     let lin = |w: &Vec<f64>, a, b| Linear::new(t64(w.clone(), &[s, a, b]), None);
-    let mlp = GatedMlp::new(lin(&wi, d, m), lin(&wg, d, m), lin(&wo, m, d));
+    let ext: std::sync::Arc<dyn MlpTransform> = std::sync::Arc::new(AffineT::new(t64(shift.clone(), &[s, 1, m]), t64(scale.clone(), &[s, 1, m])));
+    let mlp = GatedMlp::with_transform(lin(&wi, d, m), lin(&wg, d, m), lin(&wo, m, d), Some(ext));
     let y = mlp.forward(&t64(x.clone(), &[s, n, d])).to_vec_f64();
-    let want: Vec<f64> = (0..s).flat_map(|k| gated(seed(&x, k, n * d), d, m, seed(&wi, k, d * m), seed(&wg, k, d * m), seed(&wo, k, m * d))).collect();
+    let want: Vec<f64> = (0..s).flat_map(|k| gated(seed(&x, k, n * d), d, m, seed(&wi, k, d * m), seed(&wg, k, d * m), seed(&wo, k, m * d), Some(seed(&shift, k, m)), Some(seed(&scale, k, m)))).collect();
     assert_close("gated mlp", &y, &want, 1e-12);
 }
 
@@ -165,16 +172,16 @@ fn losses_match_naive() {
 /// The whole decoder in F64 against the naive composition of the components above.
 #[test]
 fn decoder_matches_naive() {
-    let cfg = DecoderConfig::new(9, 8, 2, 5, 2, 12);
+    let cfg = DecoderConfig { mlp_ext: Some(affine()), ..DecoderConfig::new(9, 8, 2, 5, 2, 12) };
     let (s, b, t) = (2, 3, 5);
     let map = RefCell::new(VarMap::new());
     let _ = Decoder::new(cfg.clone(), &VarBuilder::init(&map, s, 3).with_dtype(DType::F64)).unwrap();
     let mut vars = map.into_inner();
-    // Non-trivial norms.
+    // Non-trivial norms, gate shifts and hidden scales.
     for (i, name) in vars.names().to_vec().iter().enumerate() {
         let sh = vars.var(name).shape().to_vec();
         let n: usize = sh.iter().product();
-        let v = if name.contains("norm") { Some(rnd(n, 60 + i as u64, 0.5, 1.5)) } else { None };
+        let v = if name.contains("norm") { Some(rnd(n, 60 + i as u64, 0.5, 1.5)) } else if name.ends_with("gate_shift") { Some(rnd(n, 60 + i as u64, -0.5, 0.5)) } else if name.ends_with("hidden_scale") { Some(rnd(n, 60 + i as u64, 0.0, 1.5)) } else { None };
         if let Some(v) = v {
             vars.set(name, t64(v, &sh)).unwrap();
         }
@@ -196,7 +203,7 @@ fn decoder_matches_naive() {
             let a = attention(&xn, t, d, cfg.heads, [&g(&nm("wq"), k), &g(&nm("wk"), k), &g(&nm("wv"), k), &g(&nm("wo"), k)]);
             x.iter_mut().zip(&a).for_each(|(p, q)| *p += q);
             let xn = rms(&x, d, &g(&nm("norm_mlp"), k), 1e-6);
-            let o = gated(&xn, d, m, &g(&nm("mlp_in"), k), &g(&nm("mlp_gate"), k), &g(&nm("mlp_out"), k));
+            let o = gated(&xn, d, m, &g(&nm("mlp_in"), k), &g(&nm("mlp_gate"), k), &g(&nm("mlp_out"), k), Some(&g(&nm("gate_shift"), k)), Some(&g(&nm("hidden_scale"), k)));
             x.iter_mut().zip(&o).for_each(|(p, q)| *p += q);
         }
         let xn = rms(&x, d, &g("norm_out", k), 1e-6);

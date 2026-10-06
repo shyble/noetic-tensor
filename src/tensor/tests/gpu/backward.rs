@@ -1,4 +1,4 @@
-// Backward, one set of bodies for every GPU backend: backward on the device against
+// Backward: one set of bodies for every GPU backend: backward on the device against
 // CpuRef. Gradients equal CpuRef's bit for bit where every forward and backward op is exact
 // (elementwise without transcendentals, reductions in CpuRef's order, matmul in matrixmultiply's
 // order, indexing, deterministic scatters), and within 1e-4 (|Δ|/(1+|ref|)) through exp, ln,
@@ -137,7 +137,7 @@ fn body_backward_twice_byte_identical() {
     assert_bits("backward twice", &run(), &run());
 }
 
-/// The backward bodies, in a fresh process.
+/// The backward op bodies, in a fresh process.
 #[test]
 fn backward_against_cpu_ref() {
     crate::tensor::tests::isolated_bodies(&here!("body_"), 4);

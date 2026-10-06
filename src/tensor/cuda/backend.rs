@@ -63,7 +63,7 @@ pub(crate) struct Ctx {
     tag: Option<&'static str>,
 }
 
-/// Per-launch GPU time from events around each kernel, and host time in launches, allocations
+/// Per-launch GPU time from events around each kernel, and host time in launches, mallocs
 /// and frees (profiling; off by default, no cost when off).
 #[derive(Default)]
 struct Prof {
@@ -119,6 +119,18 @@ pub(crate) fn context() -> Result<MutexGuard<'static, Ctx>> {
     let mut g = m.lock().unwrap_or_else(|e| e.into_inner());
     g.enter()?;
     Ok(g)
+}
+
+/// Device memory in use and in total, in bytes (`cuMemGetInfo`: every process's memory and
+/// this process's pool reserve); None until this process has created its context (it never creates
+/// one).
+pub fn memory() -> Option<(u64, u64)> {
+    CTX.get()?.as_ref().ok()?;
+    let _c = context().ok()?;
+    let (mut free, mut total) = (0usize, 0usize);
+    // SAFETY: out-pointers to locals; the context is current (`context` entered it).
+    let r = unsafe { cuMemGetInfo_v2(&mut free, &mut total) };
+    (r == CUDA_SUCCESS).then(|| ((total - free) as u64, total as u64))
 }
 
 impl Ctx {
@@ -469,7 +481,7 @@ impl GpuBackend for CudaBackend {
             CpuStorage::I32(v) => (c.upload(raw_bytes(v))?, DType::I32),
             CpuStorage::U8(v) => (c.upload(raw_bytes(v))?, DType::U8),
             CpuStorage::Bool(v) => (c.upload(raw_bytes(v))?, DType::Bool),
-            CpuStorage::F64(_) => return Err(TensorError::Unsupported("f64 tensors on CUDA are not in the CUDA kernel set; cast to f32 first".into())),
+            CpuStorage::F64(_) => return Err(TensorError::Unsupported("f64 tensors are not supported on CUDA; cast to f32 first".into())),
         };
         Ok(storage(device, dtype, s.len(), m))
     }
@@ -827,7 +839,7 @@ impl GpuBackend for CudaBackend {
 }
 
 /// Start profiling the CUDA device's work: events around every launch, host time in
-/// launches, allocations and frees. Clears an earlier profile.
+/// launches, mallocs and frees. Clears an earlier profile.
 pub fn profile_start() -> Result<()> {
     let mut c = context()?;
     c.prof.on = true;
@@ -881,9 +893,9 @@ pub fn profile_take() -> Result<ProfileReport> {
     Ok(r)
 }
 
-#[cfg(test)]
 /// Kernels launched on the CUDA device so far (for reports).
-pub(crate) fn launches() -> Result<u64> {
+#[doc(hidden)]
+pub fn launches() -> Result<u64> {
     Ok(context()?.launches)
 }
 

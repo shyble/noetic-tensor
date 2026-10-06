@@ -1,12 +1,13 @@
-//! Recorded reference outputs. The parity tests compare the tensors with burn
-//! 0.21's outputs, recorded once from burn itself on each platform the tests run on
-//! (`fixtures/burn021-<os>-<arch>.txt`); burn is not a dependency.
+//! Recorded reference outputs. The parity tests compared `tensor`
+//! with burn 0.21 run live in the same process; burn is no longer a dependency, so its outputs
+//! were recorded once, from burn itself, while it still was, on each platform the tests run on
+//! (`fixtures/burn021-<os>-<arch>.txt`), and the tests compare against those records.
 //!
 //! A record is keyed by the test (its thread name, which libtest sets to the test path), the
 //! check's label, and the occurrence of that label within the test (`#n` from the second one).
 //! It holds the element type, the element count and the sha256 of the elements' little-endian
-//! bit patterns, so a record is exact to the bit. `NOETIC_FIXTURE_RECORD=FILE` appends records
-//! instead of checking them.
+//! bit patterns, so a record is exact to the bit. `TENSOR_FIXTURE_RECORD=FILE` appends records
+//! instead of checking them (how the burn file was made; its header records how).
 
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -23,7 +24,8 @@ fn platform() -> String {
     format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH)
 }
 
-/// Whether this platform has records; without them every check is skipped with a notice.
+/// Whether this platform has records; without them every check is skipped with a notice
+/// (the records were made with burn 0.21 as a dev-dependency, before it was removed).
 pub(crate) fn available() -> bool {
     FILES.iter().any(|(_, p, _)| *p == platform())
 }
@@ -66,7 +68,7 @@ fn check(what: &str, kind: &str, len: usize, bytes: impl Iterator<Item = u8>) {
     h.update(bytes.collect::<Vec<u8>>());
     let sha = crate::hash::to_hex(&h.finalize());
     let k = key(what);
-    if let Ok(path) = std::env::var("NOETIC_FIXTURE_RECORD") {
+    if let Ok(path) = std::env::var("TENSOR_FIXTURE_RECORD") {
         use std::io::Write;
         static LOCK: Mutex<()> = Mutex::new(());
         let _g = LOCK.lock().unwrap();

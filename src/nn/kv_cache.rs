@@ -3,7 +3,7 @@
 //! that token's row. Caching is for inference: a tracked tensor is refused (a cache would keep
 //! the graph alive across steps and mix gradients of different passes).
 
-use crate::error::{Error, Result};
+use crate::error::{NnError, Result};
 use crate::tensor::Tensor;
 
 #[derive(Clone, Debug, Default)]
@@ -55,22 +55,22 @@ impl KvCache {
     /// tracked tensors, shapes that do not continue the cache, or a full cache.
     pub fn append(&mut self, k: Tensor, v: Tensor) -> Result<(Tensor, Tensor)> {
         if k.is_tracked() || v.is_tracked() {
-            return Err(Error::Tensor("the KV-cache holds untracked tensors only (decode on an untracked model)".into()));
+            return Err(NnError::Tensor("the KV-cache holds untracked tensors only (decode on an untracked model)".into()));
         }
         if k.rank() != 3 || k.shape() != v.shape() {
-            return Err(Error::Tensor(format!("KV-cache: keys {:?} and values {:?} must be the same [S·B·H, t, dh]", k.shape(), v.shape())));
+            return Err(NnError::Tensor(format!("KV-cache: keys {:?} and values {:?} must be the same [S·B·H, t, dh]", k.shape(), v.shape())));
         }
         let [n, t, dh] = k.dims();
         if let Some(ck) = &self.k {
             let a = ck.shape();
             if a[0] != n || a[2] != dh {
-                return Err(Error::Tensor(format!("KV-cache holds {a:?}; cannot append {:?}", k.shape())));
+                return Err(NnError::Tensor(format!("KV-cache holds {a:?}; cannot append {:?}", k.shape())));
             }
         }
         let (k, v) = match self.capacity {
             Some(cap) => {
                 if self.len + t > cap {
-                    return Err(Error::Tensor(format!("KV-cache of capacity {cap} holds {}; cannot append {t}", self.len)));
+                    return Err(NnError::Tensor(format!("KV-cache of capacity {cap} holds {}; cannot append {t}", self.len)));
                 }
                 let (ck, cv) = match (&self.k, &self.v) {
                     (Some(a), Some(b)) => (a.clone(), b.clone()),
@@ -98,7 +98,7 @@ pub struct DecoderCache {
 }
 
 impl DecoderCache {
-    /// Growing caches.
+    /// Empty, extendable caches.
     pub fn new(blocks: usize) -> Self {
         DecoderCache { blocks: vec![KvCache::new(); blocks] }
     }

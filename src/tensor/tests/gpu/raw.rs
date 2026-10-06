@@ -1,7 +1,7 @@
-// The raw device, one set of bodies for every GPU backend (included by tests/gpu/mod.rs per
-// backend, with `M` the backend's device): its vector add bit-exact against CpuRef, its tiled
-// sgemm within |Δ| ≤ 2k·ε·(|A|·|B|) per element and repeatable. The backend's raw entry
-// points are `raw_add` and `raw_matmul` of the backend module.
+// Raw kernels: one set of bodies for every GPU backend (included by tests/gpu/mod.rs
+// per backend, with `M` the backend's device): the raw vector add bit-exact against CpuRef,
+// its tiled sgemm within |Δ| ≤ 2k·ε·(|A|·|B|) per element and repeatable. The backend's raw
+// entry points are `raw_add` and `raw_matmul` of the backend module.
 
 #[allow(unused_imports)]
 use super::*;
@@ -9,7 +9,7 @@ use super::*;
 use crate::tensor::tests::*;
 use crate::tensor::kernels as k;
 
-/// The raw-device parity bodies, in a fresh process.
+/// The raw parity bodies, in a fresh process.
 #[test]
 fn raw_parity() {
     crate::tensor::tests::isolated_bodies(&here!("body_"), 2);

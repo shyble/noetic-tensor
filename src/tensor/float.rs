@@ -2,8 +2,8 @@
 //! when the tensor is tracked). One type serves untracked and tracked (after `require_grad`).
 //!
 //! The methods began as one burn 0.21 call each on `Autodiff<NdArray<f32>>`, with burn's
-//! decomposition and backward rules. The backward rules are now
-//! the standard ones (PyTorch's formulas: `g / r` and `−g·((l / r) / r)` for div, `g / x` for
+//! decomposition and backward rules. The backward rules now
+//! are the standard ones (PyTorch's formulas: `g / r` and `−g·((l / r) / r)` for div, `g / x` for
 //! log, `g / (2y)` and `−g·y²` from the saved output for sqrt and recip, `g / n` for the means,
 //! `g / s` for div_scalar), every op computes in the tensor's dtype, and a broadcast matmul
 //! operand's gradient sums the per-batch products.
@@ -41,7 +41,7 @@ impl std::fmt::Debug for Tensor {
 }
 
 /// Run `$body` with `$T` the float type the tensor computes in: f64 for F64 storage, f32 for
-/// F32 (and for F16/BF16, which are stored as 16 bits but computed in f32).
+/// F32 (and for F16/BF16, which are stored and converted but computed in f32).
 macro_rules! fdisp {
     ($dt:expr, $T:ident => $body:expr) => {
         match compute_dtype($dt) {
@@ -619,7 +619,7 @@ impl Tensor {
 
     // ---------------------------------------------------------------- reductions
 
-    /// Sum of every element, shape `[1]`.
+    /// Sum of every element, shape [1].
     pub fn sum(self) -> Tensor {
         let shape = self.layout.shape.clone();
         let st = match gpu::gpu_reduce_all(&self, ReduceOp::Sum) {
@@ -635,7 +635,7 @@ impl Tensor {
         })
     }
 
-    /// Mean of every element, shape `[1]` (ndarray `mean`: the sum divided by n).
+    /// Mean of every element, shape [1] (ndarray `mean`: the sum divided by n).
     pub fn mean(self) -> Tensor {
         let shape = self.layout.shape.clone();
         let st = match gpu::gpu_reduce_all(&self, ReduceOp::Sum) {
@@ -716,8 +716,7 @@ impl Tensor {
             return Tensor::fresh(Storage::Gpu(g), vec![1], self.device);
         }
         fdisp!(self.dtype(), T => {
-            // NaN-propagating: any NaN makes the maximum NaN (`a != a` is the generic NaN test).
-            #[allow(clippy::eq_op)]
+            // NaN-propagating: any NaN makes the maximum NaN.
             let m = self.vals::<T>().iter().copied().reduce(|a, b| if a != a || a > b { a } else { b }).expect("max of an empty tensor");
             Tensor::raw_t(vec![m], vec![1]).on(self.device)
         })
@@ -732,7 +731,8 @@ impl Tensor {
 
     // ---------------------------------------------------------------- layout
 
-    pub(crate) fn untracked(self) -> Tensor {
+    /// The same values without autodiff tracking (no copy).
+    pub fn untracked(self) -> Tensor {
         Tensor { storage: self.storage, layout: self.layout, order: 0, node: None, device: self.device }
     }
 
@@ -773,7 +773,7 @@ impl Tensor {
         Tensor { storage, layout, order, node, device: self.device }
     }
 
-    /// Reshape; `-1` is not supported (give explicit sizes).
+    /// Reshape; `-1` is not supported (callers give explicit sizes).
     #[track_caller]
     pub fn reshape<const D: usize>(self, shape: [usize; D]) -> Tensor {
         ok(infer::reshape(&self.layout.shape, &shape));
@@ -907,7 +907,9 @@ impl Tensor {
     // ---------------------------------------------------------------- matmul
 
     /// Batched matmul `[.., m, k] × [.., k, n]`, batch dimensions broadcast when 1; a broadcast
-    /// operand's gradient is the sum of the per-batch products.
+    /// operand's gradient is the sum of the per-batch products (burn's rule that ran
+    /// `[.., b, 1, k] × [.., 1, k, n]` as one matmul over the swapped batch is gone; the forward
+    /// values are the same, the broadcast operand's gradient sums in another order).
     #[track_caller]
     pub fn matmul(self, rhs: Tensor) -> Tensor {
         ok(infer::matmul(&self.layout.shape, &rhs.layout.shape).map(drop));
@@ -971,7 +973,7 @@ impl Tensor {
         record_storage(st, self.layout.shape.clone(), &[&self], move || boxed(move |g, _| vec![Some(g.mask_fill(mask.clone(), 0.0f32))]))
     }
 
-    /// `out[p] = self[p with coordinate dim replaced by indices[p]]`.
+    /// out[p] = self[p with coordinate `dim` replaced by indices[p]].
     #[track_caller]
     pub fn gather(self, dim: usize, indices: IntTensor) -> Tensor {
         ok(infer::index(&self.layout.shape, dim, &indices.layout.shape, &indices.data(), "gather"));

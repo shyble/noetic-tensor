@@ -1,6 +1,6 @@
 //! Backends: the kernel set a tensor's device runs. `CpuRef` is
-//! the reference (bit-exact, deterministic kernels in the standard formulations); `CpuFast` runs the same operations
-//! with scoped threads and, for reductions along a lane, 4-wide SIMD partial sums (std::arch on
+//! the reference (the reference kernels: burn 0.21's arithmetic at first, the standard formulations now); `CpuFast` runs the same operations
+//! with worker threads and, for reductions along a lane, 4-wide SIMD partial sums (std::arch on
 //! aarch64, a portable 4-accumulator loop elsewhere). Elementwise maps, matmul (row blocks of
 //! the same gemm) and reductions across lanes keep Reference's per-element order, so only the
 //! lane reductions (`sum_dim` on the last axis, `sum`) differ, in the last bits.
@@ -60,7 +60,7 @@ pub fn threads() -> usize {
     std::env::var("NOETIC_THREADS").ok().and_then(|v| v.parse().ok()).unwrap_or_else(|| std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1)).max(1)
 }
 
-/// The size thresholds: below them Fast runs the Reference kernels
+/// The thresholds: below them Fast runs the Reference kernels
 /// themselves (bit-identical); measured on the M-series Mac at 4 threads under load.
 /// Unary maps (exp, ln, sqrt: compute-bound) from 2^20 elements.
 pub const FAST_MIN_MAP: usize = 1 << 20;
@@ -181,9 +181,9 @@ impl BackendStorage for CpuFast {
             for (t, cb) in c.chunks_mut(m * n).enumerate() {
                 let (ao, bo) = plan[t];
                 for (ri, cr) in cb.chunks_mut(rows_per * n).enumerate() {
-                    let r0 = ri * rows_per;
+                    let row0 = ri * rows_per;
                     let rows = cr.len() / n.max(1);
-                    let (a, b) = (&a[ao + r0 * kk..], &b[bo..]);
+                    let (a, b) = (&a[ao + row0 * kk..], &b[bo..]);
                     s.spawn(move || unsafe {
                         // SAFETY: rows×k, k×n and rows×n row-major blocks inside the buffers.
                         T::gemm(rows, kk, n, a.as_ptr(), b.as_ptr(), cr.as_mut_ptr());

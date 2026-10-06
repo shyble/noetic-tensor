@@ -1,5 +1,6 @@
 //! Activations, composed of tensor operations so they carry gradient.
-//! - `silu` and `sigmoid` are the tensor core's (the stable sigmoid, in the tensor's dtype).
+//! - `silu` and `sigmoid` are the tensor core's (the stable sigmoid, in the tensor's
+//!   dtype).
 //! - `gelu_tanh`: `0.5·x·(1 + tanh(√(2/π)·(x + 0.044715·x³)))`, with `tanh(z) = 2·sigmoid(2z) − 1`
 //!   (finite value and gradient for every finite x).
 //! - `gelu_erf`: `0.5·x·(1 + erf(x/√2))` on the in-house `erf`.
@@ -56,7 +57,7 @@ pub fn relu(x: &Tensor) -> Tensor {
     x.clone().clamp_min(0.0)
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum Activation {
     #[default]
     Silu,

@@ -1,6 +1,6 @@
 //! Hand-written bindings to the Objective-C runtime and Metal: no crate. Every
 //! message goes through `objc_msgSend`, transmuted to the exact C signature of the method
-//! (arm64 has no variadic message send), with selectors registered once per call site.
+//! (arm64 has no variadic message send), with each selector looked up once per call site.
 //! Metal.framework, Foundation and libobjc are linked by build.rs only with the `metal` feature.
 
 #![allow(non_upper_case_globals)]
@@ -37,7 +37,7 @@ impl MTLSize {
     }
 }
 
-/// `MTLResourceStorageModeShared` (CPU and GPU see one allocation: unified memory) with the
+/// `MTLResourceStorageModeShared` (CPU and GPU see one buffer: unified memory) with the
 /// default (tracked) hazard mode and default CPU cache mode.
 pub const MTLResourceStorageModeShared: usize = 0;
 /// `MTLCommandBufferStatusCompleted`.
@@ -48,7 +48,7 @@ pub const NSUTF8StringEncoding: usize = 4;
 pub const MTLMathModeSafe: isize = 0;
 pub const MTLMathFloatingPointFunctionsPrecise: isize = 1;
 
-/// A selector registered once per call site.
+/// A selector looked up once per call site.
 macro_rules! sel {
     ($name:literal) => {{
         static S: std::sync::atomic::AtomicPtr<std::ffi::c_void> = std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
@@ -81,7 +81,7 @@ pub fn class(name: &CStr) -> Id {
     unsafe { objc_getClass(name.as_ptr()) }
 }
 
-/// An autorelease pool for the current scope (popped on drop).
+/// An autorelease pool until drop (popped on drop).
 pub struct Pool(*mut c_void);
 
 impl Pool {

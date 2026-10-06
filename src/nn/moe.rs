@@ -25,11 +25,11 @@ use super::linear::{linear, Linear};
 use super::mlp::{mlp, swiglu, GatedMlp, Mlp};
 use super::module::Module;
 use super::var_builder::VarBuilder;
-use crate::error::{Error, Result};
+use crate::error::{NnError, Result};
 use crate::tensor::{softmax, Tensor};
 
 /// The experts' form.
-#[derive(Clone, Copy, Debug, PartialEq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub enum ExpertKind {
     /// `(in(x) · silu(gate(x))) · out`.
     #[default]
@@ -180,10 +180,10 @@ impl Module for Moe {
 /// An MoE: "router" `[d, E]` (N(0, 1/d)), then expert e's vars under "e{e}" ("e0.mlp_in", …).
 pub fn moe(cfg: MoeConfig, vb: &VarBuilder) -> Result<Moe> {
     if cfg.experts == 0 || cfg.top_k == 0 || cfg.top_k > cfg.experts {
-        return Err(Error::Config(format!("MoE: top_k {} of {} experts", cfg.top_k, cfg.experts)));
+        return Err(NnError::Config(format!("MoE: top_k {} of {} experts", cfg.top_k, cfg.experts)));
     }
     if cfg.capacity_factor.is_some_and(|c| c <= 0.0 || c.is_nan()) {
-        return Err(Error::Config(format!("MoE: capacity factor {:?} must be positive", cfg.capacity_factor)));
+        return Err(NnError::Config(format!("MoE: capacity factor {:?} must be positive", cfg.capacity_factor)));
     }
     let router = linear(cfg.d, cfg.experts, "router", vb)?;
     let experts = (0..cfg.experts)

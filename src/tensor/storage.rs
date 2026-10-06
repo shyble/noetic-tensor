@@ -1,5 +1,6 @@
 //! Storage: where a tensor's elements live. `Storage::Cpu` holds a
-//! `CpuStorage`, one variant per dtype; `Storage::Gpu` a device buffer. A tensor shares its storage (`Arc<Storage>`) and reads it
+//! `CpuStorage`, one variant per dtype; `Storage::Gpu` a device buffer (; it exists
+//! only in a build with a GPU feature). A tensor shares its storage (`Arc<Storage>`) and reads it
 //! through its `Layout`; host reads of GPU storage download it (`host`).
 
 use super::dtype::{DType, Element};

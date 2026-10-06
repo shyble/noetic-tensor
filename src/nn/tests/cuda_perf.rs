@@ -70,7 +70,7 @@ fn cuda_perf_train_latency() {
 
 fn report(what: &str, p: &nt::cuda::ProfileReport) {
     eprintln!(
-        "cuda profile {what}: {} launches (host {:.2} ms in launch calls); GPU busy {:.2} ms over a span of {:.2} ms; {} allocations ({:.1} MB, host {:.2} ms), {} frees (host {:.2} ms)",
+        "cuda profile {what}: {} launches (host {:.2} ms in launch calls); GPU busy {:.2} ms over a span of {:.2} ms; {} mallocs ({:.1} MB, host {:.2} ms), {} frees (host {:.2} ms)",
         p.launches, p.launch_host_ms, p.gpu_busy_ms, p.gpu_span_ms, p.allocs, p.alloc_bytes as f64 / 1e6, p.alloc_host_ms, p.frees, p.free_host_ms
     );
     for (k, n, ms) in p.kernels.iter().take(16) {

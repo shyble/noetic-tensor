@@ -325,7 +325,7 @@ fn run(stride: u32, pow_stride: u32) {
     st.report("sigmoid");
     eprintln!("cuda math sigmoid bands (|x| ≤ bound: max ulp from CpuRef): {}", bands.iter().map(|(b, u)| format!("{b}: {u}")).collect::<Vec<_>>().join(", "));
     // The GPU sigmoid is the correctly rounded-step formula (up to the few non-correctly-rounded
-    // exp/ln results); against CpuRef, 4 ulp on |x| ≤ 2 (the range the op tests bound).
+    // exp/ln results); against CpuRef, 4 ulp on |x| ≤ 2 (the forward bound's range).
     assert!(st.ne_cr * 1_000_000 <= st.n, "sigmoid: {} of {} differ from the correctly rounded steps", st.ne_cr, st.n);
     assert!(bands[0].1 <= 4, "sigmoid on |x| ≤ 2: {bands:?}");
 }

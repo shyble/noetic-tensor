@@ -1,4 +1,4 @@
-//! Checks: shape and bounds checks panic instead of
+//! Must-hold checks: shape and bounds checks panic instead of
 //! computing wrong numbers, backward needs a single-element root, NaN and all-(−∞) softmax
 //! behaviour is pinned (bit for bit, as burn), and a long graph drops without deep recursion.
 
@@ -153,7 +153,7 @@ fn storage_refuses_a_wrong_dtype_read() {
     let _ = crate::tensor::Storage::from_vec(vec![1i64]).as_slice::<f32>().len();
 }
 
-/// every check is a `TensorError` on the `try_*` API (the panicking methods report the
+/// Every check is a `TensorError` on the `try_*` API (the panicking methods report the
 /// same message), and a good call returns the same values as the panicking method.
 #[test]
 fn try_api_returns_typed_errors() {
@@ -181,11 +181,11 @@ fn try_api_returns_typed_errors() {
     assert!(matches!(t(&[2]).try_into_scalar(), Err(E::Shape(_))));
     let a = t(&[1, 2, 3]).try_matmul(t(&[1, 3, 4])).unwrap();
     assert_bits("try_matmul = matmul", a.as_slice(), t(&[1, 2, 3]).matmul(t(&[1, 3, 4])).as_slice());
-    let n: crate::Error = E::Shape("s".into()).into();
-    assert_eq!(n, crate::Error::Tensor("s".into()));
+    let n: crate::NnError = E::Shape("s".into()).into();
+    assert_eq!(n, crate::NnError::Tensor("s".into()));
 }
 
-/// reshape (of a row-major layout), swap_dims, slice and expand are views over the same
+/// Reshape (of a row-major layout), swap_dims, slice and expand are views over the same
 /// storage; their values, and every result computed from them, equal the copying versions'.
 #[test]
 fn views_share_storage_and_read_like_copies() {
@@ -290,7 +290,7 @@ fn half_and_bfloat16_conversions_are_exact() {
     assert!(F16::from_f32(f32::NAN).to_f32().is_nan() && BF16::from_f32(f32::NAN).to_f32().is_nan());
 }
 
-/// dtypes and casts. f64 tensors compute in f64; mixed dtypes are an error (casts are
+/// Dtypes and casts. f64 tensors compute in f64; mixed dtypes are an error (casts are
 /// explicit); int storages I32/U8 read as i64; f16/bf16 store converted values.
 #[test]
 fn dtypes_and_casts() {

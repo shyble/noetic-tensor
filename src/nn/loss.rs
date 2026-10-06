@@ -41,7 +41,7 @@ pub struct CeOptions {
     pub smoothing: f64,
 }
 
-/// Per-seed mean cross-entropy with an optional loss mask `[S, B, T]`, `ignore_index` and label
+/// Per-seed mean cross-entropy with an optional mask `[S, B, T]`, `ignore_index` and label
 /// smoothing, `[S]`: `sum(loss · mask) / max(count, 1)` over the scored positions. With default
 /// options it is `masked_cross_entropy` (with a mask) or `cross_entropy` (without), to the bit.
 pub fn cross_entropy_with(logits: Tensor, targets: &IntTensor, mask: Option<&Tensor>, opts: CeOptions) -> Tensor {

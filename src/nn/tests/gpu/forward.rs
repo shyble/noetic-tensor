@@ -127,7 +127,7 @@ fn body_greedy_tokens_identical_where_untied() {
             let prompts: Vec<i64> = (0..s * q).flat_map(|k| { let mut p: Vec<i64> = (0..n - 1).map(|j| 2 + r[k * n + j]).collect(); p.push(1); p }).collect();
             let (ca, crows) = greedy(&Decoder::load(cfg.clone(), &vars).unwrap(), &prompts, [s, q, n], len, v);
             nt::set_default_device(M).unwrap();
-            let (ga, grows) = greedy(&Decoder::load(cfg.clone(), &vars_on(&vars, M)).unwrap(), &prompts, [s, q, n], len, v);
+            let (ga, gpu_rows) = greedy(&Decoder::load(cfg.clone(), &vars_on(&vars, M)).unwrap(), &prompts, [s, q, n], len, v);
             nt::set_default_device(R).unwrap();
             for k in 0..s * q {
                 compared += 1;
@@ -143,7 +143,7 @@ fn body_greedy_tokens_identical_where_untied() {
                 assert!(gap <= 1e-5 * (1.0 + row[0].abs() as f64), "{what} S={s} row {k}: tokens differ at step {step} with a CPU top-2 gap of {gap:e}");
                 tied += 1;
             }
-            let d = grows.iter().flatten().zip(crows.iter().flatten()).map(|(a, b)| rel(a, b)).fold(0.0, f64::max);
+            let d = gpu_rows.iter().flatten().zip(crows.iter().flatten()).map(|(a, b)| rel(a, b)).fold(0.0, f64::max);
             eprintln!("{TAG} vs cpu_ref greedy {what:<10} S={s}: answers equal {}, decoded-row logits max rel {d:.2e}", ga == ca);
         }
     }
@@ -164,16 +164,16 @@ fn body_forward_traffic() {
     nt::set_default_device(M).unwrap();
     let dec = Decoder::load(cfg.clone(), &vars_on(&vars, M)).unwrap();
     let toks = IntTensor::from_data(rnd_ints(3 * 2 * cfg.context, 5, cfg.vocab as i64), [3, 2, cfg.context]);
-    let (_, d0, r0) = nt::transfer_counts();
+    let (_, d0, rt0) = nt::transfer_counts();
     let k0 = launches();
     let logits = dec.forward(&toks);
-    let (_, d1, r1) = nt::transfer_counts();
+    let (_, d1, rt1) = nt::transfer_counts();
     eprintln!("forward: {} kernel launches", launches() - k0);
     let _ = logits.to_vec();
-    let (_, d2, r2) = nt::transfer_counts();
-    eprintln!("forward: downloads {} then {}, round trips {}", d1 - d0, d2 - d1, r2 - r0);
-    assert_eq!((d1 - d0, r1 - r0), (0, 0), "the forward stays on the device");
-    assert_eq!((d2 - d1, r2 - r1), (1, 0), "one read of the logits");
+    let (_, d2, rt2) = nt::transfer_counts();
+    eprintln!("forward: downloads {} then {}, round trips {}", d1 - d0, d2 - d1, rt2 - rt0);
+    assert_eq!((d1 - d0, rt1 - rt0), (0, 0), "the forward stays on the device");
+    assert_eq!((d2 - d1, rt2 - rt1), (1, 0), "one read of the logits");
 }
 
 /// Decoder forward latency on CpuRef, CpuFast and the GPU (ignored; `cargo test --release

@@ -172,11 +172,11 @@ fn body_training_step_traffic() {
     let b = batch(4, 16, cfg.context, cfg.vocab, 7);
     let (tk, tg, mk) = tensors(&b);
     train_step(&cfg, &mut vars, &mut opt, &tk, &tg, &mk, 0, AuxWeights::default(), 1.0);
-    let (u0, d0, r0) = nt::transfer_counts();
+    let (u0, d0, rt0) = nt::transfer_counts();
     train_step(&cfg, &mut vars, &mut opt, &tk, &tg, &mk, 1, AuxWeights::default(), 1.0);
-    let (u1, d1, r1) = nt::transfer_counts();
-    eprintln!("{TAG} training step (small, S 4, B 16): uploads {}, downloads {}, host round trips {}", u1 - u0, d1 - d0, r1 - r0);
-    assert_eq!(r1 - r0, 0, "no host round trip in a step");
+    let (u1, d1, rt1) = nt::transfer_counts();
+    eprintln!("{TAG} training step (small, S 4, B 16): uploads {}, downloads {}, host round trips {}", u1 - u0, d1 - d0, rt1 - rt0);
+    assert_eq!(rt1 - rt0, 0, "no host round trip in a step");
     assert_eq!(d1 - d0, 1, "one read per step: the per-seed losses");
     assert!(vars.tensors().iter().all(|t| t.device() == M), "the vars stay on the device");
     assert!(opt.state().0.iter().chain(opt.state().1).all(|t| t.device() == M), "Adam's moments stay on the device");

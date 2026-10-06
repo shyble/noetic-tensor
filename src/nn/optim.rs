@@ -2,10 +2,10 @@
 //! vars of a `VarMap` from gradients by var index (`VarMap::grads` of the lifted map); None
 //! means the var took no part and is left alone.
 //!
-//! `ParamGroups` holds the per-var options: a learning-rate multiplier, frozen (never
-//! updated, such as a fixed mask), lazy rows (a row of a `[S, R, C]` var with no gradient
+//! `ParamGroups` holds the per-var options: a learning-rate multiplier, frozen (never updated), lazy
+//! rows (a row of a `[S, R, C]` var with no gradient
 //! this step keeps its moments and does not move) and an optional multiplier tensor broadcast
-//! against the var (per-element rates); plus per-seed learning rates, so a learning-rate grid
+//! against the var (per-element learning-rate factors); plus per-seed learning rates, so a learning-rate grid
 //! runs on the seed axis in one pass.
 
 use super::var::VarMap;
@@ -87,8 +87,8 @@ impl ParamGroups {
         self
     }
 
-    /// The learning-rate multiplier tensor of var `name` (broadcastable to it: `[S, 1, m]` per
-    /// column, `[S, m, 1]` per row).
+    /// The learning-rate multiplier tensor of var `name` (broadcastable to it: `[S, 1, m]` on
+    /// unit columns, `[S, m, 1]` on unit rows).
     pub fn set_multiplier(&mut self, name: &str, mult: Tensor) -> &mut Self {
         let i = self.index(name);
         self.mult[i] = Some(mult);
