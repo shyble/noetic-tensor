@@ -301,7 +301,7 @@ fn collectives_are_rank_order_exact_at_world_sizes_1_2_4() {
                 assert_eq!(bits(&sum), bits(&want), "W {w} rank {r} chunk {chunk}: the rank-order sum");
                 assert_eq!(got, (0..w).map(|q| format!("from {q}").into_bytes()).collect::<Vec<_>>());
                 assert_eq!(all, (0..w).map(|q| format!("rank {q}").into_bytes()).collect::<Vec<_>>());
-                assert_eq!(key, format!("mode=deterministic order=flat-rank backend=tcp world={w}"));
+                assert_eq!(key, format!("mode=deterministic order=flat-rank backend=tcp platform={} world={w}", platform_key()));
             }
             if w == 4 {
                 // The reverse order gives other bits: the check above can see an order change.
@@ -372,12 +372,20 @@ fn a_later_rank_may_not_pre_add_its_micro_steps() {
 }
 
 #[test]
-fn the_rendezvous_refuses_another_job_key_or_world_size() {
+fn the_rendezvous_refuses_another_job_key_platform_or_world_size() {
     let res = on_ranks_with(2, |r| opts(if r == 0 { "job a" } else { "job b" }), |_| ());
     for (r, x) in res.iter().enumerate() {
         let e = x.as_ref().unwrap_err();
         assert!(e.message().contains("refused") && e.message().contains("job key"), "rank {r}: {e}");
     }
+    // Rank 1 on another platform (another maths library, here simulated): refused before step 0.
+    let res = on_ranks_with(2, |r| GroupOptions { platform: if r == 0 { platform_key() } else { format!("{} other", platform_key()) }, ..opts("k") }, |_| ());
+    for (r, x) in res.iter().enumerate() {
+        let e = x.as_ref().unwrap_err();
+        assert!(e.message().contains("refused") && e.message().contains("mixed job"), "rank {r}: {e}");
+    }
+    assert_eq!(platform_key(), platform_key(), "the key is a function of the platform");
+    assert!(platform_key().contains(" libm="));
     // Rank 1 believes the world has 3 ranks.
     let port = free_port().unwrap();
     let env = move |r: usize, w: usize| DistEnv { rank: r, world_size: w, rank_in_node: r, node_size: w, node_rank: 0, master_addr: "127.0.0.1".into(), master_port: port };

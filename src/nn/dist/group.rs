@@ -37,11 +37,13 @@ pub struct GroupOptions {
     pub connect_timeout: Duration,
     /// The all-reduce's chunk, in elements (pipelining only; the sum's order does not depend on it).
     pub chunk_elems: usize,
+    /// The platform key every rank must share (`platform_key()`; leave the default).
+    pub platform: String,
 }
 
 impl Default for GroupOptions {
     fn default() -> Self {
-        GroupOptions { job_key: String::new(), timeout: Duration::from_secs(600), connect_timeout: Duration::from_secs(120), chunk_elems: 1 << 20 }
+        GroupOptions { job_key: String::new(), timeout: Duration::from_secs(600), connect_timeout: Duration::from_secs(120), chunk_elems: 1 << 20, platform: super::env::platform_key() }
     }
 }
 
@@ -219,7 +221,7 @@ impl ProcessGroup {
                 tune(&s, deadline.saturating_duration_since(Instant::now()))?;
                 let (op, _, _, payload) = wire::recv_any(&mut s, 0, usize::MAX)?;
                 let mut d = Dec::new(&payload);
-                let (r, w, key, addr) = (d.u64()? as usize, d.u64()? as usize, d.str()?, d.str()?);
+                let (r, w, key, platform, addr) = (d.u64()? as usize, d.u64()? as usize, d.str()?, d.str()?, d.str()?);
                 d.done()?;
                 let why = if op != Op::Hello {
                     Some("a connection that is not a rank".to_string())
@@ -227,6 +229,8 @@ impl ProcessGroup {
                     Some(format!("rank {r} has world size {w}, rank 0 has {world}"))
                 } else if key != opts.job_key {
                     Some(format!("rank {r} has job key {key:?}, rank 0 has {:?}", opts.job_key))
+                } else if platform != opts.platform {
+                    Some(format!("rank {r} runs on platform {platform:?}, rank 0 on {:?} (a mixed job)", opts.platform))
                 } else if r == 0 || r >= world || joined[r].is_some() {
                     Some(format!("a second rank {r} (or one outside 1..{world})"))
                 } else {
@@ -266,7 +270,7 @@ impl ProcessGroup {
             let ip = TcpStream::local_addr(&s).map_err(dist("socket"))?.ip();
             let data = TcpListener::bind((ip, 0)).map_err(dist(me("data listener")))?;
             let mut e = Enc::default();
-            e.u64(rank as u64).u64(world as u64).str(&opts.job_key).str(&TcpListener::local_addr(&data).map_err(dist("listener"))?.to_string());
+            e.u64(rank as u64).u64(world as u64).str(&opts.job_key).str(&opts.platform).str(&TcpListener::local_addr(&data).map_err(dist("listener"))?.to_string());
             wire::send(&mut s, Op::Hello, rank, 0, &e.0)?;
             let payload = wire::recv(&mut s, Op::Table, rank, 0, 0)?;
             let mut d = Dec::new(&payload);
@@ -327,12 +331,12 @@ impl ProcessGroup {
         self.world_size() > 1
     }
 
-    /// The reproducibility key: mode, sum order and backend. The world size is not part of it:
-    /// for a fixed number of global micro-steps the flat rank order gives the same bits at every
-    /// world size, so runs at different world sizes under one key (and one platform) may be
-    /// pooled once shown identical on that platform (see `record`).
+    /// The reproducibility key: mode, sum order, backend and the platform key every rank shares.
+    /// The world size is not part of it: for a fixed number of global micro-steps the flat rank
+    /// order gives the same bits at every world size, so runs at different world sizes under one
+    /// key may be pooled once shown identical on that platform (see `record`).
     pub fn key(&self) -> String {
-        "mode=deterministic order=flat-rank backend=tcp".to_string()
+        format!("mode=deterministic order=flat-rank backend=tcp platform={}", self.opts.platform)
     }
 
     /// What a run records about its distribution: the key and the world size.

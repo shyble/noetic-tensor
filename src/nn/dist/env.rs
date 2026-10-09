@@ -87,3 +87,28 @@ impl DistEnv {
         VARS.iter().map(|k| k.to_string()).zip(vals).collect()
     }
 }
+
+/// The platform key a job's ranks must share: the engine's platform key (OS, architecture, the
+/// CPU features its kernels select on, the compiler, the gemm kernel) and a fingerprint of the
+/// OS maths library (sha256 of the bits of f32 and f64 `exp`, `ln`, `powf` and `tanh` on fixed
+/// inputs), since softmax, log_softmax and `powf` call it and its last bits may differ between
+/// systems. The rendezvous refuses a job whose ranks differ in it.
+pub fn platform_key() -> String {
+    format!("{} libm={}", crate::tensor::platform_key(), maths_fingerprint())
+}
+
+fn maths_fingerprint() -> String {
+    use std::hint::black_box;
+    let mut b = Vec::new();
+    for i in 0..513 {
+        let x = black_box(-30.0 + 60.0 * i as f64 / 512.0 + 1.0 / 7.0);
+        let (xf, pos) = (x as f32, x.abs() + 1.0e-3);
+        for v in [xf.exp(), (pos as f32).ln(), (pos as f32).powf(black_box(0.37f32) + xf / 64.0), xf.tanh(), (pos as f32).powf(2.0)] {
+            b.extend_from_slice(&v.to_bits().to_le_bytes());
+        }
+        for v in [x.exp(), pos.ln(), pos.powf(black_box(0.37) + x / 64.0), x.tanh()] {
+            b.extend_from_slice(&v.to_bits().to_le_bytes());
+        }
+    }
+    crate::hash::sha256_hex(&b)
+}

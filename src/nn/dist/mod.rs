@@ -36,7 +36,7 @@ mod tests;
 
 pub use checkpoint::{Checkpoint, CheckpointMeta, CHECKPOINT_FORMAT};
 pub use ddp::{check_in_sync, data_parallel_step, state_hash};
-pub use env::DistEnv;
+pub use env::{platform_key, DistEnv};
 pub use group::{GroupOptions, ProcessGroup};
 pub use launch::{free_port, run, spawn, Job, LaunchConfig};
 pub use reduce::{GradSum, Reduce};
