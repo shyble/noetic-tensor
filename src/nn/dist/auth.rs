@@ -12,13 +12,21 @@
 use crate::error::{NnError, Result};
 use rand::RngCore;
 
-/// A job's secret: at least 32 bytes. Its `Debug` form never shows the bytes.
+/// A job's secret: at least 32 bytes. Its `Debug` and `Display` forms never show the bytes, and
+/// it is never written to a run record, a log or a checkpoint (only `to_hex`, for the launcher's
+/// hand-over, gives them out).
 #[derive(Clone, PartialEq, Eq)]
 pub struct JobSecret(Vec<u8>);
 
 impl std::fmt::Debug for JobSecret {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "JobSecret({} bytes)", self.0.len())
+    }
+}
+
+impl std::fmt::Display for JobSecret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("(job secret)")
     }
 }
 

@@ -60,6 +60,16 @@ pub struct ProcessGroup {
     /// By rank; None for this process.
     peers: Vec<Option<TcpStream>>,
     seq: u64,
+    /// The weight checks (`check_in_sync`): how many passed, the last hash, whether one failed.
+    pub(crate) checks: WeightChecks,
+}
+
+/// The per-step weight checks of a run, for its record.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct WeightChecks {
+    pub passed: u64,
+    pub last: Option<String>,
+    pub failed: bool,
 }
 
 fn dist<E: std::fmt::Display>(what: impl std::fmt::Display) -> impl FnOnce(E) -> NnError {
@@ -190,7 +200,7 @@ fn decode_chunk(c: usize, segs: &Chunk, payload: &[u8]) -> Result<Vec<Option<Vec
 impl ProcessGroup {
     /// The group of one process: no network; every collective is the identity.
     pub fn single() -> ProcessGroup {
-        ProcessGroup { env: DistEnv::single(), opts: GroupOptions::default(), peers: vec![None], seq: 0 }
+        ProcessGroup { env: DistEnv::single(), opts: GroupOptions::default(), peers: vec![None], seq: 0, checks: WeightChecks::default() }
     }
 
     /// The group the environment describes (`DistEnv::from_env`), or the single-process group
@@ -212,7 +222,7 @@ impl ProcessGroup {
             return Err(NnError::Dist(format!("rank {rank} is not in 0..{world}")));
         }
         if world == 1 {
-            return Ok(ProcessGroup { env: env.clone(), opts, peers: vec![None], seq: 0 });
+            return Ok(ProcessGroup { env: env.clone(), opts, peers: vec![None], seq: 0, checks: WeightChecks::default() });
         }
         let deadline = Instant::now() + opts.connect_timeout;
         let master = resolve(&env.master_addr, env.master_port)?;
@@ -383,7 +393,7 @@ impl ProcessGroup {
         for s in peers.iter().flatten() {
             tune(s, opts.timeout)?;
         }
-        let mut g = ProcessGroup { env: env.clone(), opts, peers, seq: 0 };
+        let mut g = ProcessGroup { env: env.clone(), opts, peers, seq: 0, checks: WeightChecks::default() };
         g.barrier()?;
         Ok(g)
     }
@@ -417,10 +427,21 @@ impl ProcessGroup {
         format!("mode=deterministic order=flat-rank backend=tcp platform={}", self.opts.platform)
     }
 
-    /// What a run records about its distribution: the key, the world size and whether the
-    /// handshake was authenticated.
+    /// What a run records about its distribution: the key (with the platform key and its maths
+    /// library fingerprint), the world size, whether the handshake was authenticated (never the
+    /// secret), and the per-step weight checks so far (`check_in_sync`: how many passed, whether
+    /// one failed, the last weights' sha256).
     pub fn record(&self) -> String {
-        format!("{} world={} auth={}", self.key(), self.world_size(), if self.opts.secret.is_some() { "hmac-sha256" } else { "none" })
+        let c = &self.checks;
+        format!(
+            "{} world={} auth={} weight_checks={} {} last_weights={}",
+            self.key(),
+            self.world_size(),
+            if self.opts.secret.is_some() { "hmac-sha256" } else { "none" },
+            c.passed,
+            if c.failed { "failed" } else { "ok" },
+            c.last.as_deref().unwrap_or("none")
+        )
     }
 
     /// An empty gradient sum of the right kind for this rank (see `GradSum`).

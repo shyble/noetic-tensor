@@ -306,7 +306,7 @@ fn collectives_are_rank_order_exact_at_world_sizes_1_2_4() {
                 assert_eq!(bits(&sum), bits(&want), "W {w} rank {r} chunk {chunk}: the rank-order sum");
                 assert_eq!(got, (0..w).map(|q| format!("from {q}").into_bytes()).collect::<Vec<_>>());
                 assert_eq!(all, (0..w).map(|q| format!("rank {q}").into_bytes()).collect::<Vec<_>>());
-                assert_eq!(key, format!("mode=deterministic order=flat-rank backend=tcp platform={} world={w} auth=hmac-sha256", platform_key()));
+                assert_eq!(key, format!("mode=deterministic order=flat-rank backend=tcp platform={} world={w} auth=hmac-sha256 weight_checks=0 ok last_weights=none", platform_key()));
             }
             if w == 4 {
                 // The reverse order gives other bits: the check above can see an order change.
@@ -403,7 +403,7 @@ fn the_rendezvous_refuses_another_job_key_platform_or_world_size() {
     // Without a secret on every rank (an isolated development network): accepted, recorded.
     let res = on_ranks(3, GroupOptions { secret: None, ..opts("k") }, |g| g.record());
     for x in res {
-        assert!(x.unwrap().ends_with("auth=none"));
+        assert!(x.unwrap().contains(" auth=none "));
     }
     // Rank 1 believes the world has 3 ranks.
     let port = free_port().unwrap();
@@ -516,12 +516,54 @@ fn gate_loss(cfg: &DecoderConfig, lifted: &VarMap, items: &[usize], train_step: 
 /// The gate's vars and optimizer; with `absent`, an extra var "branch.w" `[S, 4]` that only some
 /// micro-steps use (see `gate_micro`).
 fn gate_state(absent: bool) -> (VarMap, Adam) {
+    gate_state_with(absent, None)
+}
+
+/// `gate_state`, and with `idle` an extra var "idle.w" `[S, 3]` that no micro-step ever uses,
+/// trained by AdamW with decoupled decay 0.1 in the given order.
+fn gate_state_with(absent: bool, idle: Option<crate::nn::DecayOrder>) -> (VarMap, Adam) {
     let (_, mut vars) = Decoder::init(gate_cfg(), GATE_SEEDS, 5).unwrap();
     if absent {
         vars.insert("branch.w", Tensor::from_data((0..GATE_SEEDS * 4).map(|i| 0.1 * i as f32 - 0.3).collect(), [GATE_SEEDS, 4])).unwrap();
     }
-    let adam = Adam::new(AdamConfig { lr: 1e-2, ..AdamConfig::default() }, ParamGroups::new(&vars), &vars);
+    let cfg = match idle {
+        Some(order) => {
+            vars.insert("idle.w", Tensor::from_data((0..GATE_SEEDS * 3).map(|i| 0.25 * i as f32 - 0.5).collect(), [GATE_SEEDS, 3])).unwrap();
+            AdamConfig::adamw(1e-2, 0.1, order)
+        }
+        None => AdamConfig { lr: 1e-2, ..AdamConfig::default() },
+    };
+    let adam = Adam::new(cfg, ParamGroups::new(&vars), &vars);
     (vars, adam)
+}
+
+fn decay_order(name: &str) -> crate::nn::DecayOrder {
+    if name == "torch" {
+        crate::nn::DecayOrder::Torch
+    } else {
+        crate::nn::DecayOrder::AfterStep
+    }
+}
+
+/// The reference for the idle-weight gate: one process, AdamW, the micro-steps' gradients summed
+/// by `zero_filled_mean` (tensor additions; None for a var no micro-step used, which AdamW then
+/// leaves alone, decay included); the final vars' hash and "idle.w"'s bits.
+fn idle_reference(micro: usize, steps: u64, order: &str) -> (String, Vec<u32>) {
+    let cfg = gate_cfg();
+    let (mut vars, mut adam) = gate_state_with(false, Some(decay_order(order)));
+    let shard = Shard::new(ShardSpec { seed: 11, items: 24, micro_batch: 2, micro_steps: micro }, 0, 1).unwrap();
+    for step in 0..steps {
+        let grads: Vec<Vec<Option<Tensor>>> = (0..micro)
+            .map(|j| {
+                let lifted = vars.lifted();
+                let g = gate_micro(&cfg, &lifted, &shard.batch(step, j), step, j as u64, micro, false).backward();
+                lifted.grads(&g)
+            })
+            .collect();
+        let summed = zero_filled_mean(&vars, &grads);
+        crate::nn::Optimizer::step(&mut adam, &mut vars, summed, 1.0);
+    }
+    (state_hash(&vars).unwrap(), bits(&vars.var("idle.w").to_vec()))
 }
 
 /// Global micro-step j of step `step` (of `micro`): the gate's loss and, with `absent`, a branch
@@ -722,11 +764,12 @@ struct Gate {
     micro: usize,
     steps: usize,
     env: Vec<(String, String)>,
+    secret: Option<JobSecret>,
 }
 
 impl Gate {
     fn new(nproc: usize, nnodes: usize, micro: usize, steps: usize) -> Gate {
-        Gate { nproc, nnodes, micro, steps, env: vec![] }
+        Gate { nproc, nnodes, micro, steps, env: vec![], secret: None }
     }
 
     fn with(mut self, k: &str, v: impl ToString) -> Gate {
@@ -736,7 +779,7 @@ impl Gate {
 
     fn configs(&self, out: &Path) -> Vec<LaunchConfig> {
         let port = free_port().unwrap();
-        let secret = JobSecret::random();
+        let secret = self.secret.clone().unwrap_or_else(JobSecret::random);
         let mut env = vec![("DIST_TEST_OUT".to_string(), out.display().to_string()), ("DIST_TEST_MICRO".into(), self.micro.to_string()), ("DIST_TEST_STEPS".into(), self.steps.to_string())];
         env.extend(self.env.iter().cloned());
         (0..self.nnodes)
@@ -816,12 +859,13 @@ fn body_ddp_worker() {
         (r.parse::<usize>().unwrap(), s.parse::<u64>().unwrap())
     });
     let absent = std::env::var("DIST_TEST_ABSENT").is_ok();
+    let idle = std::env::var("DIST_TEST_IDLE").ok();
     crate::tensor::pin_reference();
     // The secret comes from the launcher (DIST_JOB_SECRET).
-    let mut g = ProcessGroup::from_env(GroupOptions { job_key: format!("gate micro={micro} absent={absent}"), secret: None, ..opts("") }).unwrap();
+    let mut g = ProcessGroup::from_env(GroupOptions { job_key: format!("gate micro={micro} absent={absent} idle={idle:?}"), secret: None, ..opts("") }).unwrap();
     let (rank, world) = (g.rank(), g.world_size());
     let cfg = gate_cfg();
-    let (mut vars, mut adam) = gate_state(absent);
+    let (mut vars, mut adam) = gate_state_with(absent, idle.as_deref().map(decay_order));
     check_in_sync(&mut g, &vars).unwrap();
     // The shards: every rank checks every rank's shard hash for this run's steps.
     let sp = ShardSpec { seed: 11, items: 24, micro_batch: 2, micro_steps: micro };
@@ -916,7 +960,8 @@ fn gate_world_sizes_1_2_4_equal_one_process_with_accumulation() {
         Gate::new(nproc, nnodes, micro, steps).run(&out);
         let r = results(&out, nproc * nnodes);
         let record = std::fs::read_to_string(out.join("key.txt")).unwrap();
-        assert!(record.contains(&format!("world={} auth=hmac-sha256", nproc * nnodes)), "{record}");
+        assert!(record.contains(&format!("world={} auth=hmac-sha256 weight_checks={} ok last_weights=", nproc * nnodes, steps + 1)), "{record}");
+        assert!(record.contains(&format!("platform={}", platform_key())) && record.contains(" libm="), "{record}");
         eprintln!("gate {name}: final weights sha256 {} ({:.1} s)", crate::hash::sha256_hex(r.0.as_bytes()), t.elapsed().as_secs_f64());
         got.insert(name, r);
     }
@@ -970,6 +1015,89 @@ fn gate_absent_gradients_equal_one_process_with_zeros() {
         }
     }
     std::fs::remove_dir_all(&root).unwrap();
+}
+
+/// The gate for a weight no micro-step on any rank ever uses, under AdamW with decoupled decay
+/// (both orders): one process leaves it alone, decay included, and so must every world size.
+#[test]
+fn gate_an_idle_weight_is_left_alone_like_one_process() {
+    let _guard = procs();
+    let (steps, micro) = (6, 4);
+    let root = scratch("idle");
+    let init = bits(&gate_state_with(false, Some(decay_order("after"))).0.var("idle.w").to_vec());
+    for order in ["after", "torch"] {
+        let (want, idle) = idle_reference(micro, steps as u64, order);
+        assert_eq!(idle, init, "{order}: one process leaves the idle weight alone, decay included");
+        for w in [1usize, 2, 4] {
+            let out = root.join(format!("{order}-w{w}"));
+            std::fs::create_dir_all(&out).unwrap();
+            Gate::new(w, 1, micro, steps).with("DIST_TEST_IDLE", order).run(&out);
+            let (fin, _) = results(&out, w);
+            let got = crate::hash::sha256_hex(fin.as_bytes());
+            eprintln!("idle gate {order} W {w}: final weights sha256 {got} (one process {want})");
+            assert_eq!(got, want, "{order}, W {w}");
+            let saved = VarMap::from_json(&fin).unwrap();
+            assert_eq!(bits(&saved.var("idle.w").to_vec()), init, "{order}, W {w}: the idle weight");
+        }
+    }
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+/// The job secret never appears in a run's record, logs, step logs, checkpoints or saved weights,
+/// nor in the options' and the launch configuration's debug forms; it defaults to none.
+#[test]
+fn the_secret_never_appears_in_records_logs_or_checkpoints() {
+    let _guard = procs();
+    assert!(GroupOptions::default().secret.is_none(), "no secret by default");
+    let secret = JobSecret::from_bytes(b"a secret that must never be written down, 0123456789").unwrap();
+    let (hex, upper) = (secret.to_hex(), secret.to_hex().to_uppercase());
+    let raw = b"a secret that must never be written down".to_vec();
+    let opts = GroupOptions { secret: Some(secret.clone()), ..GroupOptions::default() };
+    let mut cfg = LaunchConfig::local(2, "x").unwrap();
+    cfg.secret = Some(secret.clone());
+    for text in [format!("{opts:?}"), format!("{cfg:?}"), format!("{secret}"), format!("{secret:?}")] {
+        assert!(!text.contains(&hex) && !text.contains(&upper) && !text.contains("never be written"), "{text}");
+    }
+    let out = scratch("secret");
+    let mut gate = Gate::new(2, 1, 2, 4).with("DIST_TEST_CKPT", 2);
+    gate.secret = Some(secret);
+    gate.run(&out);
+    let mut files = vec![];
+    fn walk(d: &Path, out: &mut Vec<PathBuf>) {
+        for e in std::fs::read_dir(d).unwrap().flatten() {
+            if e.path().is_dir() {
+                walk(&e.path(), out);
+            } else {
+                out.push(e.path());
+            }
+        }
+    }
+    walk(&out, &mut files);
+    assert!(files.iter().any(|f| f.ends_with("meta.json")) && files.iter().any(|f| f.ends_with("rank-1.log")) && files.iter().any(|f| f.ends_with("key.txt")));
+    for f in &files {
+        let b = std::fs::read(f).unwrap();
+        let has = |n: &[u8]| b.windows(n.len()).any(|w| w == n);
+        assert!(!has(hex.as_bytes()) && !has(upper.as_bytes()) && !has(&raw), "{} holds the secret", f.display());
+    }
+    assert!(std::fs::read_to_string(out.join("key.txt")).unwrap().contains("auth=hmac-sha256"));
+    std::fs::remove_dir_all(&out).unwrap();
+}
+
+#[test]
+fn the_maths_fingerprint_reaches_the_ranges_the_engine_uses() {
+    let (x, p, y, e) = super::env::inputs32();
+    assert_eq!((x.len(), p.len(), y.len()), (513, 513, 513));
+    let sub = |v: f32| v != 0.0 && v.abs() < f32::MIN_POSITIVE;
+    assert!(x.iter().any(|v| sub(v.exp())), "exp with subnormal results");
+    assert!(x.iter().any(|v| v.exp().is_infinite()) && x.iter().any(|v| *v > 88.0 && v.exp().is_finite()), "exp next to and past overflow");
+    assert!(x.iter().filter(|v| **v < -30.0).count() > 100 && e.iter().any(|v| *v <= -1.0e4), "large negative softmax arguments");
+    assert!(p.iter().filter(|v| sub(**v)).count() > 10 && p.iter().any(|v| *v > 1.0e38), "subnormal and near-overflow ln/powf inputs");
+    assert!(y.iter().any(|v| *v < -10.0) && y.iter().any(|v| *v > 10.0));
+    let (x, p, _, e) = super::env::inputs64();
+    let sub = |v: f64| v != 0.0 && v.abs() < f64::MIN_POSITIVE;
+    assert!(x.iter().any(|v| sub(v.exp())) && x.iter().any(|v| v.exp().is_infinite()) && e.iter().any(|v| *v <= -1.0e4));
+    assert!(p.iter().filter(|v| sub(**v)).count() > 10 && p.iter().any(|v| *v > 1.0e307));
+    assert_eq!(platform_key(), platform_key());
 }
 
 /// Run `gate` with `kill_rank` paused at step `at`, kill that rank, check the job stopped, then

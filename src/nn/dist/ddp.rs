@@ -14,14 +14,24 @@ pub fn state_hash(vars: &VarMap) -> Result<String> {
 }
 
 /// Check that every rank holds the same vars, bit for bit; returns their hash. A rank whose vars
-/// differ fails the check on every rank.
+/// differ fails the check on every rank. The group counts the checks for its record.
 pub fn check_in_sync(group: &mut ProcessGroup, vars: &VarMap) -> Result<String> {
     let h = state_hash(vars)?;
-    let all = group.all_gather(h.as_bytes())?;
+    let all = group.all_gather(h.as_bytes());
+    let all = match all {
+        Ok(a) => a,
+        Err(e) => {
+            group.checks.failed = true;
+            return Err(e);
+        }
+    };
     if let Some(q) = all.iter().position(|x| x.as_slice() != h.as_bytes()) {
+        group.checks.failed = true;
         let theirs = String::from_utf8_lossy(&all[q]).to_string();
         return Err(NnError::Dist(format!("rank {}: the vars differ from rank {q}'s ({h} against {theirs})", group.rank())));
     }
+    group.checks.passed += 1;
+    group.checks.last = Some(h.clone());
     Ok(h)
 }
 
