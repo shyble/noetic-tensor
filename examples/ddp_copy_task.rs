@@ -49,7 +49,7 @@ fn main() -> noetic::Result<()> {
     let mut opt = Adam::new(AdamConfig::default(), ParamGroups::new(&vars), &vars);
     let shard = Shard::new(ShardSpec { seed: 7, items: 4096, micro_batch: 8, micro_steps: MICRO_STEPS }, rank, world)?;
     if rank == 0 {
-        println!("{} parameters per model, {SEEDS} models; {} ({} micro-steps per rank)", vars.count_per_seed(), group.key(), shard.micro_steps_per_rank());
+        println!("{} parameters per model, {SEEDS} models; {} ({} micro-steps per rank)", vars.count_per_seed(), group.record(), shard.micro_steps_per_rank());
     }
     for step in 0..200u64 {
         let mut ce = vec![0.0f32; SEEDS];

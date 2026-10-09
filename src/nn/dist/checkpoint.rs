@@ -29,7 +29,8 @@ pub struct CheckpointMeta {
     /// Adam's step count.
     pub adam_t: u64,
     pub world_size: usize,
-    /// The reduction key (`ProcessGroup::key`) and the job key.
+    /// The reproducibility key (`ProcessGroup::key`; the world size is recorded above) and the
+    /// job key.
     pub group_key: String,
     pub job_key: String,
     /// Each rank's loader cursor, in rank order.
@@ -148,7 +149,7 @@ impl Checkpoint {
         let c = Checkpoint::load(&dir.join(name.trim()))?;
         if c.meta.world_size != group.world_size() || c.meta.job_key != group.options().job_key {
             return Err(NnError::Dist(format!(
-                "the checkpoint at step {} was taken at world size {} with job key {:?}; this run has world size {} and job key {:?} (another key: resume refused)",
+                "the checkpoint at step {} was taken at world size {} with job key {:?}; this run has world size {} and job key {:?} (a resume keeps both: resume refused)",
                 c.meta.step,
                 c.meta.world_size,
                 c.meta.job_key,

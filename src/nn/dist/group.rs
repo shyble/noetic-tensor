@@ -327,10 +327,17 @@ impl ProcessGroup {
         self.world_size() > 1
     }
 
-    /// The reduction's key: backend, mode, order and world size. Results are comparable only
-    /// under one key; a change of world size is a change of key.
+    /// The reproducibility key: mode, sum order and backend. The world size is not part of it:
+    /// for a fixed number of global micro-steps the flat rank order gives the same bits at every
+    /// world size, so runs at different world sizes under one key (and one platform) may be
+    /// pooled once shown identical on that platform (see `record`).
     pub fn key(&self) -> String {
-        format!("backend=tcp mode=deterministic order=rank world={}", self.world_size())
+        "mode=deterministic order=flat-rank backend=tcp".to_string()
+    }
+
+    /// What a run records about its distribution: the key and the world size.
+    pub fn record(&self) -> String {
+        format!("{} world={}", self.key(), self.world_size())
     }
 
     /// An empty gradient sum of the right kind for this rank (see `GradSum`).

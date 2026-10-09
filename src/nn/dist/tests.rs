@@ -254,7 +254,7 @@ fn collectives_are_rank_order_exact_at_world_sizes_1_2_4() {
                 let all = g.all_gather(format!("rank {r}").as_bytes())?;
                 let sum = g.all_reduce_f32(&order_sensitive(r, 23))?;
                 g.barrier()?;
-                Ok((sum, got, all, g.key()))
+                Ok((sum, got, all, g.record()))
             });
             let want = fold_in(&(0..w).map(|r| order_sensitive(r, 23)).collect::<Vec<_>>());
             for (r, x) in res.into_iter().enumerate() {
@@ -262,7 +262,7 @@ fn collectives_are_rank_order_exact_at_world_sizes_1_2_4() {
                 assert_eq!(bits(&sum), bits(&want), "W {w} rank {r} chunk {chunk}: the rank-order sum");
                 assert_eq!(got, (0..w).map(|q| format!("from {q}").into_bytes()).collect::<Vec<_>>());
                 assert_eq!(all, (0..w).map(|q| format!("rank {q}").into_bytes()).collect::<Vec<_>>());
-                assert_eq!(key, format!("backend=tcp mode=deterministic order=rank world={w}"));
+                assert_eq!(key, format!("mode=deterministic order=flat-rank backend=tcp world={w}"));
             }
             if w == 4 {
                 // The reverse order gives other bits: the check above can see an order change.
@@ -681,7 +681,7 @@ fn body_ddp_worker() {
     }
     if rank == 0 {
         vars.save(out.join("final.json")).unwrap();
-        std::fs::write(out.join("key.txt"), format!("{}\n{}\n", g.key(), mine)).unwrap();
+        std::fs::write(out.join("key.txt"), format!("{}\n{}\n", g.record(), mine)).unwrap();
     }
     g.barrier().unwrap();
 }
