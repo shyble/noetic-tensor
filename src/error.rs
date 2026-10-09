@@ -3,7 +3,11 @@
 
 use std::fmt;
 
+/// The nn library's error: one variant per area.
+///
+/// Non-exhaustive (since 0.3.0): later releases may add variants, so a match needs a wildcard pattern.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum NnError {
     /// An invalid configuration: sizes or options that contradict each other.
     Config(String),
