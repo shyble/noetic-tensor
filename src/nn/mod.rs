@@ -6,6 +6,7 @@ pub mod attention;
 pub mod block;
 pub mod clip;
 pub mod decoder;
+pub mod dist;
 pub mod dropout;
 pub mod ema;
 pub mod embedding;

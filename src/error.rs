@@ -13,6 +13,9 @@ pub enum NnError {
     Persist(String),
     /// A tensor whose shape, length or type does not match what it is loaded into.
     Tensor(String),
+    /// Distributed training: the environment, the rendezvous, a collective, a launched process
+    /// or a coordinated checkpoint.
+    Dist(String),
 }
 
 /// The 0.1.0 name of `NnError`, kept for compatibility.
@@ -25,17 +28,18 @@ impl NnError {
     /// The message.
     pub fn message(&self) -> &str {
         match self {
-            Self::Config(m) | Self::Persist(m) | Self::Tensor(m) => m,
+            Self::Config(m) | Self::Persist(m) | Self::Tensor(m) | Self::Dist(m) => m,
             Self::ExtensionNeedsGatedMlp => "an MLP extension needs the gated MLP",
         }
     }
 
-    /// The area, in lower case: "config", "persist" or "tensor".
+    /// The area, in lower case: "config", "persist", "tensor" or "dist".
     pub fn kind(&self) -> &'static str {
         match self {
             Self::Config(_) | Self::ExtensionNeedsGatedMlp => "config",
             Self::Persist(_) => "persist",
             Self::Tensor(_) => "tensor",
+            Self::Dist(_) => "dist",
         }
     }
 }
@@ -66,9 +70,9 @@ mod tests {
 
     #[test]
     fn display_is_the_message_and_every_variant_has_its_kind() {
-        let all = [Error::Config("c".into()), Error::Persist("p".into()), Error::Tensor("t".into()), Error::ExtensionNeedsGatedMlp];
+        let all = [Error::Config("c".into()), Error::Persist("p".into()), Error::Tensor("t".into()), Error::ExtensionNeedsGatedMlp, Error::Dist("d".into())];
         let kinds: Vec<&str> = all.iter().map(|e| e.kind()).collect();
-        assert_eq!(kinds, ["config", "persist", "tensor", "config"]);
+        assert_eq!(kinds, ["config", "persist", "tensor", "config", "dist"]);
         for e in &all {
             assert_eq!(e.to_string(), e.message());
             assert_eq!(String::from(e.clone()), e.message());
