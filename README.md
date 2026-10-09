@@ -75,7 +75,7 @@ assert_eq!(loss.shape(), &[4]);
 - Losses.
 - Optimizers: Adam and AdamW (both decay orders), SGD, EMA, learning-rate schedules, gradient clipping.
 - `VarMap`: save and load, exact to the bit.
-- Data-parallel training across processes and machines (`nn::dist`), in the shape of torch.distributed, DDP and torchrun: a process group from torchrun's environment variables, collectives over TCP (standard library only), a deterministic mode in which gradients are summed in rank order (W processes with k accumulation micro-steps each give the weights of one process with W·k, bit for bit, on the CPU), a sharded sampler, coordinated checkpoints and a launcher (`examples/launch.rs`). See `doc/distributed.md`.
+- Data-parallel training across processes (tested on one machine; multi-machine runs are untested) (`nn::dist`), in the shape of torch.distributed, DDP and torchrun: a process group from torchrun's environment variables, collectives over TCP (standard library only), a deterministic mode in which gradients are summed in rank order (W processes with k accumulation micro-steps each give the weights of one process with W·k, bit for bit, on the CPU, tested on one machine), a sharded sampler, coordinated checkpoints and a launcher (`examples/launch.rs`). See `doc/distributed.md`.
 
 Every var has a leading seed axis `[S, …]`. That lets S independently initialised models train in one pass, and seed i's weights never depend on S.
 

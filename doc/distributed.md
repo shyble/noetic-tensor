@@ -1,10 +1,10 @@
 # Distributed training: deterministic data parallelism (first step)
 
-9 October 2026. Branch `dist-b1`, on top of the 0.2.0 release. CPU only; multi-GPU and multi-machine runs are later steps.
+9 October 2026, on top of the 0.2.0 release. CPU only; multi-GPU and multi-machine runs are later steps.
 
 ## What it adds
 
-`noetic::nn::dist`: data-parallel training across processes and machines, with an API in the shape of torch.distributed, DDP and torchrun. Standard library only (`std::net`, `std::process`); no new dependency.
+`noetic::nn::dist`: data-parallel training across processes (tested on one machine; multi-machine runs are untested), with an API in the shape of torch.distributed, DDP and torchrun. Standard library only (`std::net`, `std::process`); no new dependency.
 
 | Item | What it does |
 |---|---|
@@ -69,7 +69,7 @@ Run on macOS aarch64 (rustc 1.94.1), CPU reference backend, localhost TCP, at mo
 |---|---|---|
 | 2 | 1 process, 2 accumulation micro-steps | `9a24f95f50da08572824c0561890ea3213cc5076274b0cfaffe3bc6abba851d6` |
 | 2 | 1 node × 2 processes | same |
-| 2 | 2 nodes × 1 process (two launchers, one per node) | same |
+| 2 | 2 launchers acting as nodes, on one machine (localhost) | same |
 | 2 | distribution off (no rendezvous variables) | same |
 | 4 | 1 process, 4 accumulation micro-steps | `02ead67c808b59bde6852388e13d48a89c257b22a8080b95549bc780f2cf1a78` |
 | 4 | 2 processes × 2 micro-steps | same |
@@ -100,6 +100,10 @@ The whole gate (20 tests) runs in about 3 s: `cargo test --release --lib nn::dis
 - All 88 existing library tests and the README doctests pass.
 - Six training configurations (decoder, MoE decoder, decoder with dropout; each with AdamW and SGD with momentum; 60 steps, 3 models on the seed axis) give byte-identical final vars and logits built against 0.2.0 and against this branch; the copy-task example's output is identical.
 - `data_parallel_step` with the single-process group and one micro-step equals `nn::train_step` bit for bit (vars and Adam moments, `one_process_with_one_micro_step_equals_the_plain_trainer`).
+
+## For the release notes
+
+- adds the variant NnError::Dist
 
 ## Known limits and next steps
 
