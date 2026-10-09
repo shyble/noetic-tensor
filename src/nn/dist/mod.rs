@@ -1,7 +1,7 @@
-//! Data-parallel training across processes and machines, in the shape of torch.distributed, DDP
-//! and torchrun: a process group initialised from the environment, collectives over TCP (std
-//! only), a gradient sum shared by local accumulation and the all-reduce, a sharded sampler, a
-//! coordinated checkpoint and a launcher.
+//! Data-parallel training across processes (tested on one machine; multi-machine runs are
+//! untested), in the shape of torch.distributed, DDP and torchrun: a process group initialised
+//! from the environment, collectives over TCP (std only), a gradient sum shared by local
+//! accumulation and the all-reduce, a sharded sampler, a coordinated checkpoint and a launcher.
 //!
 //! **Deterministic mode** (the only mode so far):
 //! - every all-reduce adds the ranks' contributions in rank order, and each rank's micro-steps in
@@ -11,8 +11,9 @@
 //!   (`GradSum` is the one routine both paths use, and `ProcessGroup::all_reduce_grads` passes the
 //!   running sum along the ranks in order);
 //! - no compression, no quantised or asynchronous reductions, no timing-dependent order;
-//! - the world size is part of the run's key (`ProcessGroup::key`); a checkpoint refuses to resume
-//!   at another world size.
+//! - the world size is not part of the run's key (`ProcessGroup::key`): the weights depend on the
+//!   number of global micro-steps, not on how the ranks share them; it stays in the run's record
+//!   (`ProcessGroup::record`), and a checkpoint refuses to resume at another world size.
 //!
 //! A fast mode (backend-native reduction order, overlap) may come later; it will carry its own
 //! key and is never mixed with this one.
