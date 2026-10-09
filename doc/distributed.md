@@ -1,6 +1,6 @@
 # Distributed training: deterministic data parallelism (first step)
 
-9 October 2026, on top of the 0.2.0 release. CPU only; multi-GPU and multi-machine runs are later steps.
+Released in 0.3.0 (9 October 2026). CPU only; multi-GPU and multi-machine runs are later steps.
 
 ## What it adds
 

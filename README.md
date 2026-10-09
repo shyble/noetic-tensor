@@ -28,7 +28,7 @@ Most frameworks treat run-to-run variation as noise you live with. noetic-tensor
 
 It suits research code whose results must be rebuilt exactly, experiments that run many seeds of a small model, and anyone who wants to see how a framework works from the tensor up.
 
-This repository is the engine's single source: releases are tagged here, starting with 0.2.0. This crate is the tensor and neural-network engine only; it contains none of Noetic's methods. The library is imported as `use noetic::tensor::…` and `use noetic::nn::…` (the package name stays noetic-tensor).
+This repository is the engine's single source: releases are tagged here, starting with 0.2.0, and their changes are in `CHANGELOG.md`. This crate is the tensor and neural-network engine only; it contains none of Noetic's methods. The library is imported as `use noetic::tensor::…` and `use noetic::nn::…` (the package name stays noetic-tensor).
 
 ## Using it
 
