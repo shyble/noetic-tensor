@@ -58,7 +58,10 @@ check_in_sync(&mut group, &vars)?;
 
 ## Coordinated checkpoints
 
-Every rank hashes its vars, Adam's moments and step count; the hashes must agree. Rank 0 writes `step-<step>/` (`vars.json`, `adam_m.json`, `adam_v.json` in the bit-exact var-map format, and `meta.json` with the step, the world size, both keys, every rank's cursor, the state hash and each file's sha256) through a temporary folder and a rename, then points `latest` at it by a rename. A barrier ends the checkpoint, so once any rank is past it the checkpoint is on disk whole. Loading checks every hash and refuses another world size or job key. Rank 0 writes on its own machine: across machines the folder must be shared or copied before a resume.
+- **Agreement.** Every rank hashes its vars, Adam's moments and step count; the hashes must agree (the ranks took identical steps).
+- **One writer, verified by every rank.** Every rank builds the checkpoint's bytes itself (`vars.json`, `adam_m.json`, `adam_v.json` in the bit-exact var-map format, and `meta.json` with the step, the world size, both keys, every rank's cursor, the state hash and each file's sha256) and the checkpoint's sha256 (the sha256 of `meta.json`). Rank 0, the single writer, writes `step-<step>/` through a temporary folder and a rename, reads the files back and checks them, and broadcasts the sha256 of what it wrote. Every rank compares it with its own and acknowledges; any mismatch fails the checkpoint on every rank and `latest` is not moved. Then `latest` points at the folder (a rename), and a barrier ends the checkpoint: once any rank is past it, the checkpoint is on disk whole and verified.
+- **Copies on other nodes** (`Checkpoint::save_with(…, node_copies = true)`): the first rank of every other node writes the same bytes into its own node-local folder and checks them the same way; a copy is kept only if it holds the same bytes. A folder shared between nodes must not have two writers (leave `node_copies` off there).
+- **Resume** (`Checkpoint::load_latest`, called by every rank): every file is checked against its sha256 and the state hash; every rank must have loaded the same checkpoint (the same sha256), so a differing copy stops the resume on every rank; the checkpoint must hold a cursor for every rank, and a rank resumes from its own (`Checkpoint::cursor`); another world size or job key is refused.
 
 ## The gate and its results
 
@@ -98,11 +101,13 @@ Resuming either checkpoint with one process is refused (a resume keeps the world
 
 `absent_gradients_count_as_zeros` checks the same at the gradient level, bit for bit, for absent-first, absent-last and absent-everywhere cases.
 
+**Checkpoint copies** (`checkpoint_copies_on_other_nodes_hold_the_same_bytes_and_resume_checks_them`, 2 nodes × 1 process as threads, a folder per node): the copy on node 1 is byte-identical to rank 0's; both ranks resume from their own copy to the same vars; one changed byte in node 1's copy stops the resume on both ranks.
+
 **Refusals and failures:** another job key or world size at the rendezvous (refused on every rank, with the reason), mismatched collectives, a rank that leaves (its peers fail at once), a later rank that pre-added its micro-steps, a failing rank under the launcher (the job stops; the others are killed), a changed byte in a checkpoint (sha256 mismatch).
 
 **The example** (`examples/ddp_copy_task.rs`, 200 steps, 4 global micro-steps of 8 items): final weights sha256 `7d4c24b808b50f964754c8c2e6a674ba7b82e91af96023a9649ad0ea22be6012` alone, under the launcher with 2 processes and with 4, on every rank.
 
-The whole gate (22 tests) runs in about 3 s: `cargo test --release --lib nn::dist`.
+The whole gate (23 tests) runs in about 4 s: `cargo test --release --lib nn::dist`.
 
 ## Single-device behaviour is unchanged
 
@@ -122,5 +127,5 @@ The whole gate (22 tests) runs in about 3 s: `cargo test --release --lib nn::dis
 - **The OS maths library.** softmax, log_softmax and `powf` call the platform's `exp`, `log` and `pow`, whose last bits may differ between operating systems or library versions. The gate runs on one machine, so it is unaffected. Across machines, every node must use the same maths library (or the engine its own implementations); a difference would make the ranks' optimizer steps differ, which `check_in_sync` reports as an error rather than letting the ranks drift.
 - **Throughput.** The running sum passes the ranks one after another (latency rises with W) and the last rank sends the total to each rank (its traffic rises with W). Both keep the order; a tree or ring broadcast of the total, bucketing and overlap with the backward pass are later work and must not change the order of the additions.
 - **Memory.** A rank after the first keeps its k micro-step gradients until the running sum arrives (k copies of the gradients; with one micro-step per rank, none extra).
-- **Checkpoints.** Rank 0 writes; multi-machine resume needs a shared or copied folder. The optimizer state saved is Adam's; SGD's momentum buffers are not yet in the checkpoint.
+- **Checkpoints.** Rank 0 is the single writer; node copies are optional and checked. The optimizer state saved is Adam's; SGD's momentum buffers are not yet in the checkpoint.
 - **Not yet built:** reduce-scatter, sharded optimizer state and parameters (FSDP-style), elastic restart, a fast mode, generic callbacks (batch seen, checkpoint reached), NCCL.

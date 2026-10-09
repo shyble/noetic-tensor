@@ -579,7 +579,7 @@ fn a_checkpoint_round_trips_and_refuses_another_world_size() {
     let mut g = ProcessGroup::single();
     data_parallel_step(&mut g, &mut vars, &mut adam, 2, Reduce::Mean, 1.0, |l, i| gate_loss(&cfg, l, &[i, i + 1], i as u64)).unwrap();
     Checkpoint::save(&mut g, &dir, 1, 1, &vars, &adam).unwrap();
-    let c = Checkpoint::load_latest(&g, &dir).unwrap().expect("a checkpoint");
+    let c = Checkpoint::load_latest(&mut g, &dir).unwrap().expect("a checkpoint");
     assert_eq!((c.meta.step, c.meta.world_size, c.meta.cursors.clone()), (1, 1, vec![1]));
     let (_, mut fresh) = Decoder::init(cfg.clone(), GATE_SEEDS, 10).unwrap();
     let mut fresh_adam = Adam::new(AdamConfig::default(), ParamGroups::new(&fresh), &fresh);
@@ -590,7 +590,7 @@ fn a_checkpoint_round_trips_and_refuses_another_world_size() {
     let meta_path = Checkpoint::folder(&dir, 1).join("meta.json");
     let text = std::fs::read_to_string(&meta_path).unwrap().replace("\"world_size\": 1", "\"world_size\": 2");
     std::fs::write(&meta_path, text).unwrap();
-    let e = Checkpoint::load_latest(&g, &dir).unwrap_err();
+    let e = Checkpoint::load_latest(&mut g, &dir).unwrap_err();
     assert!(e.message().contains("resume refused"), "{e}");
     // A changed byte in the vars fails the hash.
     let vp = Checkpoint::folder(&dir, 1).join("vars.json");
@@ -601,6 +601,62 @@ fn a_checkpoint_round_trips_and_refuses_another_world_size() {
     std::fs::write(&vp, text).unwrap();
     assert!(Checkpoint::load(&Checkpoint::folder(&dir, 1)).unwrap_err().message().contains("sha256"));
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn checkpoint_copies_on_other_nodes_hold_the_same_bytes_and_resume_checks_them() {
+    // 2 nodes × 1 process as threads, each node with its own folder: rank 0 writes, rank 1 (the
+    // first of node 1) keeps a copy; both resume from their own copy; a changed copy stops the
+    // resume on every rank.
+    let _guard = procs();
+    let root = scratch("node-copies");
+    let port = free_port().unwrap();
+    let run = |phase: &'static str| {
+        let hs: Vec<_> = (0..2usize)
+            .map(|r| {
+                let dir = root.join(format!("node-{r}"));
+                std::thread::spawn(move || -> Result<String> {
+                    let env = DistEnv { rank: r, world_size: 2, rank_in_node: 0, node_size: 1, node_rank: r, master_addr: "127.0.0.1".into(), master_port: port };
+                    let mut g = ProcessGroup::init(&env, opts("copies"))?;
+                    let cfg = gate_cfg();
+                    let (mut vars, mut adam) = gate_state(false);
+                    if phase == "save" {
+                        let shard = Shard::new(ShardSpec { seed: 11, items: 24, micro_batch: 2, micro_steps: 2 }, r, 2)?;
+                        data_parallel_step(&mut g, &mut vars, &mut adam, 1, Reduce::Mean, 1.0, |l, i| gate_loss(&cfg, l, &shard.batch(0, i), shard.global_micro(i) as u64))?;
+                        Checkpoint::save_with(&mut g, &dir, 1, 1, &vars, &adam, true)?;
+                        return state_hash(&vars);
+                    }
+                    let c = Checkpoint::load_latest(&mut g, &dir)?.expect("a checkpoint");
+                    assert_eq!(c.cursor(r), Some(1));
+                    c.restore(&mut vars, &mut adam)?;
+                    state_hash(&vars)
+                })
+            })
+            .collect();
+        hs.into_iter().map(|h| h.join().unwrap()).collect::<Vec<_>>()
+    };
+    let saved = run("save");
+    let (a, b) = (saved[0].as_ref().unwrap(), saved[1].as_ref().unwrap());
+    assert_eq!(a, b);
+    for f in ["vars.json", "adam_m.json", "adam_v.json", "meta.json"] {
+        let read = |n: usize| std::fs::read(Checkpoint::folder(&root.join(format!("node-{n}")), 1).join(f)).unwrap();
+        assert!(read(0) == read(1), "{f}: the copy holds other bytes");
+    }
+    let resumed = run("resume");
+    assert_eq!(resumed[0].as_ref().unwrap(), a);
+    assert_eq!(resumed[1].as_ref().unwrap(), a);
+    // Change one byte of node 1's copy: both ranks refuse to resume.
+    let vp = Checkpoint::folder(&root.join("node-1"), 1).join("adam_v.json");
+    let mut text = std::fs::read_to_string(&vp).unwrap();
+    let at = text.rfind("\"data\":\"").unwrap() + 8;
+    let c = if &text[at..at + 1] == "0" { "1" } else { "0" };
+    text.replace_range(at..at + 1, c);
+    std::fs::write(&vp, text).unwrap();
+    for (r, x) in run("resume").iter().enumerate() {
+        let e = x.as_ref().unwrap_err();
+        assert!(e.message().contains("resume refused") || e.message().contains("sha256"), "rank {r}: {e}");
+    }
+    std::fs::remove_dir_all(&root).unwrap();
 }
 
 // -------------------------------------------------------- the gates, in separate processes
@@ -736,8 +792,8 @@ fn body_ddp_worker() {
     let ckpt = out.join("ckpt");
     let mut start = 0;
     if std::env::var("DIST_TEST_RESUME").is_ok() {
-        let c = Checkpoint::load_latest(&g, &ckpt).unwrap_or_else(|e| panic!("{e}")).expect("a checkpoint to resume from");
-        assert_eq!(c.meta.cursors, vec![c.meta.step; world], "every rank's cursor");
+        let c = Checkpoint::load_latest(&mut g, &ckpt).unwrap_or_else(|e| panic!("{e}")).expect("a checkpoint to resume from");
+        assert_eq!(c.cursor(rank), Some(c.meta.step), "this rank's cursor");
         start = c.restore(&mut vars, &mut adam).unwrap();
         check_in_sync(&mut g, &vars).unwrap();
         eprintln!("rank {rank}: resumed at step {start}");
