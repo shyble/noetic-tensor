@@ -61,22 +61,39 @@ fn main() {
         }
         cfg.master_port = free_port().unwrap_or_else(|e| fail(&e.to_string()));
     }
-    cfg.secret = match (secret_file, no_auth) {
-        (Some(_), true) => usage("--secret-file and --no-auth exclude each other"),
-        (Some(f), false) => {
-            let text = std::fs::read_to_string(&f).unwrap_or_else(|e| fail(&format!("{f}: {e}")));
-            Some(JobSecret::from_hex(&text).unwrap_or_else(|e| fail(&format!("{f}: {e}"))))
-        }
-        (None, true) => {
-            eprintln!("launch: no job secret: unauthenticated, for an isolated development network only");
-            None
-        }
-        (None, false) if cfg.nnodes == 1 => Some(JobSecret::random()),
-        (None, false) => usage("a multi-node job needs --secret-file (or --no-auth on an isolated development network)"),
+    cfg.secret = match job_secret(secret_file.as_deref(), no_auth, cfg.nnodes) {
+        Ok(s) => s,
+        Err(Refused::Usage(why)) => usage(&why),
+        Err(Refused::Fail(why)) => fail(&why),
     };
+    if cfg.secret.is_none() {
+        eprintln!("launch: no job secret: unauthenticated, for an isolated development network only");
+    }
     eprintln!("launch: {} process(es) on node {} of {}, world size {}, rendezvous {}:{}", cfg.nproc_per_node, cfg.node_rank, cfg.nnodes, cfg.world_size(), cfg.master_addr, cfg.master_port);
     if let Err(e) = run(&cfg) {
         fail(&e.to_string());
+    }
+}
+
+/// Why the launch is refused: a usage error (exit 2) or a failure (exit 1).
+#[derive(Debug)]
+enum Refused {
+    Usage(String),
+    Fail(String),
+}
+
+/// The job's secret: from `--secret-file`, none with `--no-auth`, a fresh one for a single-node
+/// job; a multi-node job without either is refused.
+fn job_secret(secret_file: Option<&str>, no_auth: bool, nnodes: usize) -> Result<Option<JobSecret>, Refused> {
+    match (secret_file, no_auth) {
+        (Some(_), true) => Err(Refused::Usage("--secret-file and --no-auth exclude each other".into())),
+        (Some(f), false) => {
+            let text = std::fs::read_to_string(f).map_err(|e| Refused::Fail(format!("{f}: {e}")))?;
+            JobSecret::from_hex(&text).map(Some).map_err(|e| Refused::Fail(format!("{f}: {e}")))
+        }
+        (None, true) => Ok(None),
+        (None, false) if nnodes == 1 => Ok(Some(JobSecret::random())),
+        (None, false) => Err(Refused::Usage("a multi-node job needs --secret-file (or --no-auth on an isolated development network)".into())),
     }
 }
 
@@ -88,4 +105,34 @@ fn usage(why: &str) -> ! {
 fn fail(why: &str) -> ! {
     eprintln!("launch: {why}");
     std::process::exit(1)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{job_secret, Refused};
+
+    #[test]
+    fn a_multi_node_launch_without_a_secret_is_refused() {
+        for nnodes in [2, 3] {
+            let e = job_secret(None, false, nnodes).unwrap_err();
+            assert!(matches!(&e, Refused::Usage(m) if m.contains("multi-node job needs --secret-file")), "{e:?}");
+        }
+        // One node gets a fresh secret; --no-auth is an explicit choice, on any number of nodes.
+        assert!(job_secret(None, false, 1).unwrap().is_some());
+        assert!(job_secret(None, true, 2).unwrap().is_none());
+        assert!(matches!(job_secret(Some("f"), true, 2), Err(Refused::Usage(_))));
+        // A secret file shared by the nodes is read; a missing or short one is refused.
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target").join("launch-tests");
+        std::fs::create_dir_all(&dir).unwrap();
+        let (good, short) = (dir.join(format!("secret-{}", std::process::id())), dir.join(format!("short-{}", std::process::id())));
+        std::fs::write(&good, "ab".repeat(32)).unwrap();
+        std::fs::write(&short, "ab".repeat(8)).unwrap();
+        let got = job_secret(Some(good.to_str().unwrap()), false, 2).unwrap().unwrap();
+        assert_eq!(got.to_hex(), "ab".repeat(32));
+        assert!(matches!(job_secret(Some(short.to_str().unwrap()), false, 2), Err(Refused::Fail(_))));
+        assert!(matches!(job_secret(Some(dir.join("missing").to_str().unwrap()), false, 2), Err(Refused::Fail(_))));
+        for p in [good, short] {
+            std::fs::remove_file(p).unwrap();
+        }
+    }
 }

@@ -22,6 +22,11 @@ sha2 = "0.10"
 # depend on it (it is part of the platform key).
 matrixmultiply = { version = "=0.3.11", default-features = false, features = ["std"] }
 
+[[example]]
+# Its tests (the launch command's refusals) run with `cargo test`.
+name = "launch"
+test = true
+
 [features]
 # NVIDIA CUDA: links the system CUDA driver, NVRTC and cuBLAS through hand-written FFI (no crates).
 cuda = []
