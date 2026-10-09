@@ -22,6 +22,7 @@
 //! distribution is off: `ProcessGroup::from_env` gives the single-process group, which opens no
 //! socket and whose collectives are the identity.
 
+mod auth;
 mod checkpoint;
 mod ddp;
 mod env;
@@ -34,6 +35,7 @@ mod wire;
 #[cfg(test)]
 mod tests;
 
+pub use auth::JobSecret;
 pub use checkpoint::{Checkpoint, CheckpointMeta, CHECKPOINT_FORMAT};
 pub use ddp::{check_in_sync, data_parallel_step, state_hash};
 pub use env::{platform_key, DistEnv};

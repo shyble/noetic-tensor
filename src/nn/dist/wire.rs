@@ -26,6 +26,8 @@ pub(crate) enum Op {
     ReduceChunk = 8,
     ResultMeta = 9,
     ResultChunk = 10,
+    Challenge = 11,
+    LinkAck = 12,
 }
 
 impl Op {
@@ -39,11 +41,13 @@ impl Op {
             Op::Gather => "all-gather",
             Op::ReduceMeta | Op::ReduceChunk => "all-reduce",
             Op::ResultMeta | Op::ResultChunk => "all-reduce result",
+            Op::Challenge => "challenge",
+            Op::LinkAck => "link answer",
         }
     }
 
     fn from_u32(v: u32) -> Option<Op> {
-        [Op::Hello, Op::Table, Op::Link, Op::Barrier, Op::Broadcast, Op::Gather, Op::ReduceMeta, Op::ReduceChunk, Op::ResultMeta, Op::ResultChunk].into_iter().find(|o| *o as u32 == v)
+        [Op::Hello, Op::Table, Op::Link, Op::Barrier, Op::Broadcast, Op::Gather, Op::ReduceMeta, Op::ReduceChunk, Op::ResultMeta, Op::ResultChunk, Op::Challenge, Op::LinkAck].into_iter().find(|o| *o as u32 == v)
     }
 }
 
@@ -174,6 +178,10 @@ impl<'a> Dec<'a> {
     pub fn f32s(&mut self, n: usize) -> Result<Vec<f32>> {
         let b = self.take(4 * n)?;
         Ok(b.chunks_exact(4).map(|c| f32::from_bits(u32::from_le_bytes([c[0], c[1], c[2], c[3]]))).collect())
+    }
+    /// Bytes read so far.
+    pub fn at(&self) -> usize {
+        self.at
     }
     pub fn done(&self) -> Result<()> {
         if self.at != self.b.len() {

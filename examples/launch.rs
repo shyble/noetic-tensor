@@ -10,9 +10,11 @@
 //!
 //! Options: `--nproc-per-node N` (1), `--nnodes M` (1), `--node-rank I` (0), `--master-addr A`
 //! (127.0.0.1), `--master-port P` (a free port; set it on every node of a multi-node job),
-//! `--log-dir D` (one log per rank; default: this terminal).
+//! `--log-dir D` (one log per rank; default: this terminal), `--secret-file F` (the job's secret
+//! in hex, at least 32 bytes; the same file on every node), `--no-auth` (no secret: isolated
+//! development networks only). A single-node job without a secret file gets a fresh secret.
 
-use noetic::nn::dist::{free_port, run, LaunchConfig};
+use noetic::nn::dist::{free_port, run, JobSecret, LaunchConfig};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -31,9 +33,15 @@ fn main() {
         args: cmd[1..].to_vec(),
         env: vec![],
         log_dir: None,
+        secret: None,
     };
+    let (mut secret_file, mut no_auth) = (None, false);
     let mut it = opts.iter();
     while let Some(k) = it.next() {
+        if k == "--no-auth" {
+            no_auth = true;
+            continue;
+        }
         let v = it.next().unwrap_or_else(|| usage(&format!("{k} needs a value")));
         let num = |v: &str| v.parse::<usize>().unwrap_or_else(|_| usage(&format!("{k} {v}: not a number")));
         match k.as_str() {
@@ -43,6 +51,7 @@ fn main() {
             "--master-addr" => cfg.master_addr = v.clone(),
             "--master-port" => cfg.master_port = u16::try_from(num(v)).unwrap_or_else(|_| usage("--master-port: not a port")),
             "--log-dir" => cfg.log_dir = Some(v.into()),
+            "--secret-file" => secret_file = Some(v.clone()),
             _ => usage(&format!("unknown option {k}")),
         }
     }
@@ -52,6 +61,19 @@ fn main() {
         }
         cfg.master_port = free_port().unwrap_or_else(|e| fail(&e.to_string()));
     }
+    cfg.secret = match (secret_file, no_auth) {
+        (Some(_), true) => usage("--secret-file and --no-auth exclude each other"),
+        (Some(f), false) => {
+            let text = std::fs::read_to_string(&f).unwrap_or_else(|e| fail(&format!("{f}: {e}")));
+            Some(JobSecret::from_hex(&text).unwrap_or_else(|e| fail(&format!("{f}: {e}"))))
+        }
+        (None, true) => {
+            eprintln!("launch: no job secret: unauthenticated, for an isolated development network only");
+            None
+        }
+        (None, false) if cfg.nnodes == 1 => Some(JobSecret::random()),
+        (None, false) => usage("a multi-node job needs --secret-file (or --no-auth on an isolated development network)"),
+    };
     eprintln!("launch: {} process(es) on node {} of {}, world size {}, rendezvous {}:{}", cfg.nproc_per_node, cfg.node_rank, cfg.nnodes, cfg.world_size(), cfg.master_addr, cfg.master_port);
     if let Err(e) = run(&cfg) {
         fail(&e.to_string());
@@ -59,7 +81,7 @@ fn main() {
 }
 
 fn usage(why: &str) -> ! {
-    eprintln!("launch: {why}\nusage: launch [--nproc-per-node N] [--nnodes M --node-rank I --master-addr A --master-port P] [--log-dir D] -- <command> [args...]");
+    eprintln!("launch: {why}\nusage: launch [--nproc-per-node N] [--nnodes M --node-rank I --master-addr A --master-port P] [--log-dir D] [--secret-file F | --no-auth] -- <command> [args...]");
     std::process::exit(2)
 }
 

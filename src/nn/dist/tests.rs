@@ -22,8 +22,13 @@ use std::time::{Duration, Instant};
 
 // ------------------------------------------------------------------------------- helpers
 
+/// The tests' job secret.
+fn test_secret() -> JobSecret {
+    JobSecret::from_bytes(b"a test secret of thirty-two bytes, or more").unwrap()
+}
+
 fn opts(key: &str) -> GroupOptions {
-    GroupOptions { job_key: key.into(), timeout: Duration::from_secs(60), connect_timeout: Duration::from_secs(30), ..GroupOptions::default() }
+    GroupOptions { job_key: key.into(), timeout: Duration::from_secs(60), connect_timeout: Duration::from_secs(30), secret: Some(test_secret()), ..GroupOptions::default() }
 }
 
 /// Run `f` on `w` ranks, each a thread of this process with its own group over localhost TCP;
@@ -301,7 +306,7 @@ fn collectives_are_rank_order_exact_at_world_sizes_1_2_4() {
                 assert_eq!(bits(&sum), bits(&want), "W {w} rank {r} chunk {chunk}: the rank-order sum");
                 assert_eq!(got, (0..w).map(|q| format!("from {q}").into_bytes()).collect::<Vec<_>>());
                 assert_eq!(all, (0..w).map(|q| format!("rank {q}").into_bytes()).collect::<Vec<_>>());
-                assert_eq!(key, format!("mode=deterministic order=flat-rank backend=tcp platform={} world={w}", platform_key()));
+                assert_eq!(key, format!("mode=deterministic order=flat-rank backend=tcp platform={} world={w} auth=hmac-sha256", platform_key()));
             }
             if w == 4 {
                 // The reverse order gives other bits: the check above can see an order change.
@@ -386,6 +391,20 @@ fn the_rendezvous_refuses_another_job_key_platform_or_world_size() {
     }
     assert_eq!(platform_key(), platform_key(), "the key is a function of the platform");
     assert!(platform_key().contains(" libm="));
+    // Another secret, or none on one side: refused on both ranks.
+    let other = JobSecret::from_bytes(&[7u8; 32]).unwrap();
+    for (name, a, b) in [("another secret", Some(test_secret()), Some(other)), ("none at rank 1", Some(test_secret()), None), ("none at rank 0", None, Some(test_secret()))] {
+        let res = on_ranks_with(2, |r| GroupOptions { secret: if r == 0 { a.clone() } else { b.clone() }, ..opts("k") }, |_| ());
+        for (r, x) in res.iter().enumerate() {
+            let e = x.as_ref().unwrap_err();
+            assert!(e.message().contains("authenticated handshake"), "{name}, rank {r}: {e}");
+        }
+    }
+    // Without a secret on every rank (an isolated development network): accepted, recorded.
+    let res = on_ranks(3, GroupOptions { secret: None, ..opts("k") }, |g| g.record());
+    for x in res {
+        assert!(x.unwrap().ends_with("auth=none"));
+    }
     // Rank 1 believes the world has 3 ranks.
     let port = free_port().unwrap();
     let env = move |r: usize, w: usize| DistEnv { rank: r, world_size: w, rank_in_node: r, node_size: w, node_rank: 0, master_addr: "127.0.0.1".into(), master_port: port };
@@ -422,6 +441,17 @@ fn a_stopped_rank_or_another_collective_fails_the_others() {
     });
     let e = res[1].as_ref().unwrap().as_ref().unwrap_err();
     assert!(e.message().contains("different collectives"), "{e}");
+}
+
+#[test]
+fn the_job_secret_reads_hex_and_never_shows_its_bytes() {
+    let s = JobSecret::random();
+    assert_eq!(JobSecret::from_hex(&s.to_hex()).unwrap(), s);
+    assert_ne!(JobSecret::random(), s);
+    assert_eq!(format!("{s:?}"), "JobSecret(32 bytes)");
+    assert!(JobSecret::from_hex("abcd").is_err(), "too short");
+    assert!(JobSecret::from_hex(&"zz".repeat(32)).is_err(), "not hex");
+    assert!(JobSecret::from_bytes(&[1; 31]).is_err());
 }
 
 #[test]
@@ -706,6 +736,7 @@ impl Gate {
 
     fn configs(&self, out: &Path) -> Vec<LaunchConfig> {
         let port = free_port().unwrap();
+        let secret = JobSecret::random();
         let mut env = vec![("DIST_TEST_OUT".to_string(), out.display().to_string()), ("DIST_TEST_MICRO".into(), self.micro.to_string()), ("DIST_TEST_STEPS".into(), self.steps.to_string())];
         env.extend(self.env.iter().cloned());
         (0..self.nnodes)
@@ -719,6 +750,7 @@ impl Gate {
                 args: worker_args("body_ddp_worker"),
                 env: env.clone(),
                 log_dir: Some(out.join("logs")),
+                secret: Some(secret.clone()),
             })
             .collect()
     }
@@ -785,7 +817,8 @@ fn body_ddp_worker() {
     });
     let absent = std::env::var("DIST_TEST_ABSENT").is_ok();
     crate::tensor::pin_reference();
-    let mut g = ProcessGroup::from_env(GroupOptions { job_key: format!("gate micro={micro} absent={absent}"), ..opts("") }).unwrap();
+    // The secret comes from the launcher (DIST_JOB_SECRET).
+    let mut g = ProcessGroup::from_env(GroupOptions { job_key: format!("gate micro={micro} absent={absent}"), secret: None, ..opts("") }).unwrap();
     let (rank, world) = (g.rank(), g.world_size());
     let cfg = gate_cfg();
     let (mut vars, mut adam) = gate_state(absent);
@@ -882,6 +915,8 @@ fn gate_world_sizes_1_2_4_equal_one_process_with_accumulation() {
         let t = Instant::now();
         Gate::new(nproc, nnodes, micro, steps).run(&out);
         let r = results(&out, nproc * nnodes);
+        let record = std::fs::read_to_string(out.join("key.txt")).unwrap();
+        assert!(record.contains(&format!("world={} auth=hmac-sha256", nproc * nnodes)), "{record}");
         eprintln!("gate {name}: final weights sha256 {} ({:.1} s)", crate::hash::sha256_hex(r.0.as_bytes()), t.elapsed().as_secs_f64());
         got.insert(name, r);
     }

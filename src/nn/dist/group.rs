@@ -17,6 +17,7 @@
 //!   micro-steps in rank order, whatever the timing. Large sums go in chunks so the ranks work
 //!   at once; the chunk size changes the pipelining, never the order of the additions.
 
+use super::auth::{self, JobSecret};
 use super::env::DistEnv;
 use super::reduce::{fold, fold_var, GradSum, Part};
 use super::wire::{self, Dec, Enc, Op};
@@ -39,11 +40,15 @@ pub struct GroupOptions {
     pub chunk_elems: usize,
     /// The platform key every rank must share (`platform_key()`; leave the default).
     pub platform: String,
+    /// The job's secret for the authenticated handshake; None reads `DIST_JOB_SECRET` in
+    /// `from_env`, and without one the job is unauthenticated (isolated development networks
+    /// only).
+    pub secret: Option<JobSecret>,
 }
 
 impl Default for GroupOptions {
     fn default() -> Self {
-        GroupOptions { job_key: String::new(), timeout: Duration::from_secs(600), connect_timeout: Duration::from_secs(120), chunk_elems: 1 << 20, platform: super::env::platform_key() }
+        GroupOptions { job_key: String::new(), timeout: Duration::from_secs(600), connect_timeout: Duration::from_secs(120), chunk_elems: 1 << 20, platform: super::env::platform_key(), secret: None }
     }
 }
 
@@ -190,7 +195,10 @@ impl ProcessGroup {
 
     /// The group the environment describes (`DistEnv::from_env`), or the single-process group
     /// when distribution is off.
-    pub fn from_env(opts: GroupOptions) -> Result<ProcessGroup> {
+    pub fn from_env(mut opts: GroupOptions) -> Result<ProcessGroup> {
+        if opts.secret.is_none() {
+            opts.secret = JobSecret::from_env()?;
+        }
         match DistEnv::from_env()? {
             None => Ok(ProcessGroup { opts, ..ProcessGroup::single() }),
             Some(env) => ProcessGroup::init(&env, opts),
@@ -216,15 +224,27 @@ impl ProcessGroup {
             table[0] = TcpListener::local_addr(&data).map_err(dist("listener"))?.to_string();
             let mut joined: Vec<Option<TcpStream>> = (0..world).map(|_| None).collect();
             let mut refusal = None;
+            let secret = opts.secret.as_ref();
+            // Each rank's challenge, answered in the table.
+            let mut answers: Vec<Vec<u8>> = vec![vec![]; world];
+            let mut extra: Vec<(TcpStream, Vec<u8>)> = vec![];
             for _ in 1..world {
                 let mut s = accept(&l, deadline, "the ranks to join")?;
                 tune(&s, deadline.saturating_duration_since(Instant::now()))?;
+                let mine = auth::challenge();
+                let mut e = Enc::default();
+                e.bytes(&mine);
+                wire::send(&mut s, Op::Challenge, 0, 0, &e.0)?;
                 let (op, _, _, payload) = wire::recv_any(&mut s, 0, usize::MAX)?;
                 let mut d = Dec::new(&payload);
-                let (r, w, key, platform, addr) = (d.u64()? as usize, d.u64()? as usize, d.str()?, d.str()?, d.str()?);
+                let (r, w, key, platform, addr, theirs) = (d.u64()? as usize, d.u64()? as usize, d.str()?, d.str()?, d.str()?, d.bytes()?.to_vec());
+                let fields = payload[..d.at()].to_vec();
+                let proof = d.bytes()?.to_vec();
                 d.done()?;
                 let why = if op != Op::Hello {
                     Some("a connection that is not a rank".to_string())
+                } else if !auth::verify(secret, "hello", &mine, &fields, &proof) {
+                    Some(format!("a rank calling itself rank {r} failed the authenticated handshake (another job secret, or none where one is needed)"))
                 } else if w != world {
                     Some(format!("rank {r} has world size {w}, rank 0 has {world}"))
                 } else if key != opts.job_key {
@@ -239,11 +259,12 @@ impl ProcessGroup {
                 if let Some(why) = why {
                     refusal.get_or_insert(why);
                     // Keep the connection so the refused rank hears the reason.
-                    joined.push(Some(s));
+                    extra.push((s, theirs));
                     continue;
                 }
                 table[r] = addr;
                 joined[r] = Some(s);
+                answers[r] = theirs;
             }
             let mut e = Enc::default();
             match &refusal {
@@ -257,8 +278,19 @@ impl ProcessGroup {
                     }
                 }
             }
-            for s in joined.iter_mut().flatten() {
-                let _ = wire::send(s, Op::Table, 0, 0, &e.0);
+            // The table (or the refusal) as one field, and the answer to the rank's challenge.
+            let table_msg = |theirs: &[u8]| {
+                let mut m = Enc::default();
+                m.bytes(&e.0).bytes(&auth::answer(secret, "table", theirs, &e.0));
+                m.0
+            };
+            for (r, s) in joined.iter_mut().enumerate() {
+                if let Some(s) = s {
+                    let _ = wire::send(s, Op::Table, 0, 0, &table_msg(&answers[r]));
+                }
+            }
+            for (s, theirs) in extra.iter_mut() {
+                let _ = wire::send(s, Op::Table, 0, 0, &table_msg(theirs));
             }
             if let Some(why) = refusal {
                 return Err(NnError::Dist(format!("the rendezvous refused the job: {why}")));
@@ -269,13 +301,30 @@ impl ProcessGroup {
             tune(&s, deadline.saturating_duration_since(Instant::now()).max(Duration::from_secs(1)))?;
             let ip = TcpStream::local_addr(&s).map_err(dist("socket"))?.ip();
             let data = TcpListener::bind((ip, 0)).map_err(dist(me("data listener")))?;
+            let secret = opts.secret.as_ref();
+            let payload = wire::recv(&mut s, Op::Challenge, rank, 0, 0)?;
+            let mut d = Dec::new(&payload);
+            let theirs = d.bytes()?.to_vec();
+            d.done()?;
+            let mine = auth::challenge();
             let mut e = Enc::default();
-            e.u64(rank as u64).u64(world as u64).str(&opts.job_key).str(&opts.platform).str(&TcpListener::local_addr(&data).map_err(dist("listener"))?.to_string());
+            e.u64(rank as u64).u64(world as u64).str(&opts.job_key).str(&opts.platform).str(&TcpListener::local_addr(&data).map_err(dist("listener"))?.to_string()).bytes(&mine);
+            let proof = auth::answer(secret, "hello", &theirs, &e.0);
+            e.bytes(&proof);
             wire::send(&mut s, Op::Hello, rank, 0, &e.0)?;
             let payload = wire::recv(&mut s, Op::Table, rank, 0, 0)?;
-            let mut d = Dec::new(&payload);
+            let mut outer = Dec::new(&payload);
+            let (fields, proof) = (outer.bytes()?, outer.bytes()?);
+            outer.done()?;
+            let authentic = auth::verify(secret, "table", &mine, fields, proof);
+            let mut d = Dec::new(fields);
             if d.u8()? != 0 {
-                return Err(NnError::Dist(format!("the rendezvous refused the job: {}", d.str()?)));
+                let why = d.str()?;
+                let tag = if authentic { "" } else { " (an unauthenticated reply)" };
+                return Err(NnError::Dist(format!("the rendezvous refused the job{tag}: {why}")));
+            }
+            if !authentic {
+                return Err(NnError::Dist(format!("rank {rank}: rank 0's reply failed the authenticated handshake (another job secret, or none where one is needed)")));
             }
             let table: Vec<String> = (0..world).map(|_| d.str()).collect::<Result<_>>()?;
             d.done()?;
@@ -283,23 +332,52 @@ impl ProcessGroup {
         };
         // The mesh: connect to every lower rank, accept every higher one.
         let mut peers: Vec<Option<TcpStream>> = (0..world).map(|_| None).collect();
+        let secret = opts.secret.as_ref();
         for (q, addr) in table.iter().enumerate().take(rank) {
             let a: SocketAddr = addr.parse().map_err(dist(format!("rank {q}'s address {addr:?}")))?;
             let mut s = connect(a, deadline, &format!("rank {q}"))?;
+            tune(&s, deadline.saturating_duration_since(Instant::now()).max(Duration::from_secs(1)))?;
+            let payload = wire::recv(&mut s, Op::Challenge, rank, q, 0)?;
+            let mut d = Dec::new(&payload);
+            let theirs = d.bytes()?.to_vec();
+            d.done()?;
+            let mine = auth::challenge();
             let mut e = Enc::default();
-            e.u64(rank as u64).str(&opts.job_key);
+            e.u64(rank as u64).str(&opts.job_key).bytes(&mine);
+            let proof = auth::answer(secret, "link", &theirs, &e.0);
+            e.bytes(&proof);
             wire::send(&mut s, Op::Link, rank, 0, &e.0)?;
+            let payload = wire::recv(&mut s, Op::LinkAck, rank, q, 0)?;
+            let mut d = Dec::new(&payload);
+            let back = d.bytes()?.to_vec();
+            d.done()?;
+            if !auth::verify(secret, "link answer", &mine, &(q as u64).to_le_bytes(), &back) {
+                return Err(NnError::Dist(format!("rank {rank}: rank {q}'s link failed the authenticated handshake")));
+            }
             peers[q] = Some(s);
         }
         for _ in rank + 1..world {
             let mut s = accept(&data, deadline, "the higher ranks to connect")?;
             tune(&s, deadline.saturating_duration_since(Instant::now()).max(Duration::from_secs(1)))?;
+            let mine = auth::challenge();
+            let mut e = Enc::default();
+            e.bytes(&mine);
+            wire::send(&mut s, Op::Challenge, rank, 0, &e.0)?;
             let (op, sender, _, payload) = wire::recv_any(&mut s, rank, usize::MAX)?;
             let mut d = Dec::new(&payload);
-            let (q, key) = (d.u64()? as usize, d.str()?);
-            if op != Op::Link || q != sender || q <= rank || q >= world || peers[q].is_some() || key != opts.job_key {
+            let (q, key, theirs) = (d.u64()? as usize, d.str()?, d.bytes()?.to_vec());
+            let fields = payload[..d.at()].to_vec();
+            let proof = d.bytes()?.to_vec();
+            d.done()?;
+            if op != Op::Link || !auth::verify(secret, "link", &mine, &fields, &proof) {
+                return Err(NnError::Dist(format!("rank {rank}: a link that failed the authenticated handshake")));
+            }
+            if q != sender || q <= rank || q >= world || peers[q].is_some() || key != opts.job_key {
                 return Err(NnError::Dist(format!("rank {rank}: an unexpected link from rank {q}")));
             }
+            let mut e = Enc::default();
+            e.bytes(&auth::answer(secret, "link answer", &theirs, &(rank as u64).to_le_bytes()));
+            wire::send(&mut s, Op::LinkAck, rank, 0, &e.0)?;
             peers[q] = Some(s);
         }
         for s in peers.iter().flatten() {
@@ -339,9 +417,10 @@ impl ProcessGroup {
         format!("mode=deterministic order=flat-rank backend=tcp platform={}", self.opts.platform)
     }
 
-    /// What a run records about its distribution: the key and the world size.
+    /// What a run records about its distribution: the key, the world size and whether the
+    /// handshake was authenticated.
     pub fn record(&self) -> String {
-        format!("{} world={}", self.key(), self.world_size())
+        format!("{} world={} auth={}", self.key(), self.world_size(), if self.opts.secret.is_some() { "hmac-sha256" } else { "none" })
     }
 
     /// An empty gradient sum of the right kind for this rank (see `GradSum`).

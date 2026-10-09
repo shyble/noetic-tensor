@@ -6,6 +6,7 @@
 //! Multi-node jobs start one launcher per node with the same `nnodes`, master address and port
 //! and the node's `node_rank`; global ranks are `node_rank · nproc_per_node + rank_in_node`.
 
+use super::auth::JobSecret;
 use super::env::DistEnv;
 use crate::error::{NnError, Result};
 use std::path::PathBuf;
@@ -28,10 +29,15 @@ pub struct LaunchConfig {
     /// A folder for one log per rank (`rank-<r>.log`, stdout and stderr); None inherits the
     /// launcher's.
     pub log_dir: Option<PathBuf>,
+    /// The job's secret for the authenticated handshake, passed to every rank in
+    /// `DIST_JOB_SECRET`; every node's launcher must pass the same one. None: an
+    /// unauthenticated job (isolated development networks only).
+    pub secret: Option<JobSecret>,
 }
 
 impl LaunchConfig {
-    /// `nproc` processes of `command` on this machine, meeting on 127.0.0.1 at a free port.
+    /// `nproc` processes of `command` on this machine, meeting on 127.0.0.1 at a free port, with a
+    /// fresh job secret.
     pub fn local(nproc: usize, command: impl Into<PathBuf>) -> Result<LaunchConfig> {
         Ok(LaunchConfig {
             nproc_per_node: nproc,
@@ -43,6 +49,7 @@ impl LaunchConfig {
             args: vec![],
             env: vec![],
             log_dir: None,
+            secret: Some(JobSecret::random()),
         })
     }
 
@@ -89,6 +96,10 @@ pub fn spawn(cfg: &LaunchConfig) -> Result<Job> {
         let env = cfg.rank_env(local);
         let mut c = Command::new(&cfg.command);
         c.args(&cfg.args).envs(env.to_vars()).envs(cfg.env.iter().map(|(k, v)| (k, v))).stdin(Stdio::null());
+        match &cfg.secret {
+            Some(s) => c.env(JobSecret::ENV, s.to_hex()),
+            None => c.env_remove(JobSecret::ENV),
+        };
         if let Some(d) = &cfg.log_dir {
             let p = d.join(format!("rank-{}.log", env.rank));
             let f = std::fs::File::create(&p).map_err(|e| NnError::Dist(format!("{}: {e}", p.display())))?;

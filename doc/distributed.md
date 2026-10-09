@@ -15,8 +15,9 @@
 | `check_in_sync`, `state_hash` | Every rank holds the same vars, bit for bit (all-gather of a sha256 of the saved vars). |
 | `Shard`, `ShardSpec` | The distributed sampler: each rank's micro-batches, from (seed, rank, world size) only; a sha256 per shard. |
 | `Checkpoint` | Coordinated checkpoints: vars, Adam's moments and step count, every rank's loader cursor. |
-| `LaunchConfig`, `spawn`, `run`, `Job` | A torchrun-style launcher: N processes per node, rendezvous variables set, a log per rank; the first failure stops the job. |
-| `examples/launch.rs` | The launcher as a command: `launch --nproc-per-node N [--nnodes M --node-rank I --master-addr A --master-port P] [--log-dir D] -- <command> [args]`. |
+| `LaunchConfig`, `spawn`, `run`, `Job` | A torchrun-style launcher: N processes per node, rendezvous variables and the job's secret set, a log per rank; the first failure stops the job. |
+| `JobSecret`, `platform_key` | The per-job secret of the authenticated handshake; the platform key every rank must share. |
+| `examples/launch.rs` | The launcher as a command: `launch --nproc-per-node N [--nnodes M --node-rank I --master-addr A --master-port P] [--log-dir D] [--secret-file F | --no-auth] -- <command> [args]`. |
 | `examples/ddp_copy_task.rs` | The copy task trained data-parallel; the same weights at 1, 2 and 4 processes. |
 
 A training loop:
@@ -51,10 +52,12 @@ check_in_sync(&mut group, &vars)?;
 
 ## Rendezvous and failure
 
-- Rank 0 listens on `MASTER_ADDR:MASTER_PORT`. Every other rank connects and sends its rank, world size, job key, platform key and the address of its data listener (on the interface it reached rank 0 through). Rank 0 checks that the ranks are distinct and agree on the world size, the job key and the platform key, then sends the address table, or the reason for refusing the job, to every rank. Ranks connect to every lower rank, accept every higher one, and a barrier ends the rendezvous.
+- Rank 0 listens on `MASTER_ADDR:MASTER_PORT`. Every other rank connects, answers rank 0's challenge (below), and sends its rank, world size, job key, platform key and the address of its data listener (on the interface it reached rank 0 through). Rank 0 checks that the ranks are distinct and agree on the world size, the job key and the platform key, then sends the address table, or the reason for refusing the job, to every rank. Ranks connect to every lower rank, accept every higher one, and a barrier ends the rendezvous.
 - A lost peer is an error on the next message (end of stream), not a hang; a silent peer fails after `GroupOptions::timeout` (600 s by default).
 - The launcher stops the whole job when any rank fails or is killed, and names the rank.
-- Plain TCP, no encryption or authentication: private networks only.
+- **The authenticated handshake.** The launcher gives every rank the job's secret (`JobSecret`, at least 32 bytes, in `DIST_JOB_SECRET`; a single-node launch makes a fresh one, a multi-node job passes the same `--secret-file` on every node). At the rendezvous and on every link of the mesh each side sends a fresh 32-byte random challenge and the other answers with HMAC-SHA256(secret, label · challenge · its message), computed in-house on the existing sha256 (checked against RFC 4231's vectors). A rank that cannot answer, or answers for another secret, is refused, with the reason on every rank. The record says `auth=hmac-sha256` or `auth=none`.
+- **Without a secret** the job key alone admits a rank (`auth=none`, or `--no-auth` on the launcher): for an isolated development network only. A rank holding a secret refuses a peer without one.
+- **Open:** only the handshake is authenticated; the collectives' traffic is plain TCP, neither authenticated nor encrypted. Encryption of traffic that leaves a private network is not decided; until then, jobs run inside a private network only.
 
 - **The platform key** (`platform_key()`): the engine's platform key (OS, architecture, the CPU features the kernels select on, the compiler, the gemm kernel's version) plus a fingerprint of the OS maths library: the sha256 of the bits of f32 and f64 `exp`, `ln`, `powf` and `tanh` on 513 fixed inputs. A job whose ranks differ in it is refused at the rendezvous, before step 0. The per-step weight check (`check_in_sync`) stays as a backstop for anything the fingerprint does not see. On this Mac: `macos-aarch64-neon-rustc_1.94.1-matrixmultiply-0.3.11 libm=…` (the fingerprint's full sha256 is in every run's key).
 
@@ -105,11 +108,11 @@ Resuming either checkpoint with one process is refused (a resume keeps the world
 
 **Checkpoint copies** (`checkpoint_copies_on_other_nodes_hold_the_same_bytes_and_resume_checks_them`, 2 nodes × 1 process as threads, a folder per node): the copy on node 1 is byte-identical to rank 0's; both ranks resume from their own copy to the same vars; one changed byte in node 1's copy stops the resume on both ranks.
 
-**Refusals and failures:** another job key, platform key or world size at the rendezvous (refused on every rank, with the reason), mismatched collectives, a rank that leaves (its peers fail at once), a later rank that pre-added its micro-steps, a failing rank under the launcher (the job stops; the others are killed), a changed byte in a checkpoint (sha256 mismatch).
+**Refusals and failures:** another job key, platform key, world size or job secret (or none against one) at the rendezvous (refused on every rank, with the reason), mismatched collectives, a rank that leaves (its peers fail at once), a later rank that pre-added its micro-steps, a failing rank under the launcher (the job stops; the others are killed), a changed byte in a checkpoint (sha256 mismatch).
 
-**The example** (`examples/ddp_copy_task.rs`, 200 steps, 4 global micro-steps of 8 items): final weights sha256 `7d4c24b808b50f964754c8c2e6a674ba7b82e91af96023a9649ad0ea22be6012` alone, under the launcher with 2 processes and with 4, on every rank.
+**The example** (`examples/ddp_copy_task.rs`, 200 steps, 4 global micro-steps of 8 items): final weights sha256 `7d4c24b808b50f964754c8c2e6a674ba7b82e91af96023a9649ad0ea22be6012` alone, under the launcher with 2 processes and with 4, and with 2 launchers acting as nodes of 2 processes each on one machine (a shared secret file), on every rank.
 
-The whole gate (23 tests) runs in about 4 s: `cargo test --release --lib nn::dist`.
+The whole gate (24 distributed tests, plus the HMAC vectors) runs in about 4 s: `cargo test --release --lib nn::dist`.
 
 ## Single-device behaviour is unchanged
 
