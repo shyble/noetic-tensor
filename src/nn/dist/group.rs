@@ -469,8 +469,8 @@ impl ProcessGroup {
         }
         if w == 1 || r == 0 {
             let mut acc: Part = vec![None; n];
-            for p in &parts {
-                fold(&mut acc, p);
+            for (i, p) in parts.iter().enumerate() {
+                fold(&mut acc, p, i > 0);
             }
             if w == 1 {
                 return Ok((acc, count));
@@ -513,9 +513,9 @@ impl ProcessGroup {
             let payload = wire::recv(self.peer(r - 1), Op::ReduceChunk, r, r - 1, seq)?;
             let mut vals = decode_chunk(c, segs, &payload)?;
             // This rank's micro-steps, in order, after the ranks before it.
-            for p in &parts {
+            for (i, p) in parts.iter().enumerate() {
                 for (k, &(v, lo, hi)) in segs.iter().enumerate() {
-                    fold_var(&mut vals[k], p[v].as_ref().map(|x| &x[lo..hi]));
+                    fold_var(&mut vals[k], p[v].as_ref().map(|x| &x[lo..hi]), before + i > 0);
                 }
             }
             if last {

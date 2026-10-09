@@ -94,12 +94,15 @@ fn grads_bits(g: &[Option<Tensor>]) -> Vec<Option<Vec<u32>>> {
 
 #[test]
 fn the_ordered_sum_starts_from_the_first_contribution() {
-    // From the first contribution, never from zeros: −0 stays −0.
-    let mut acc: Part = vec![None, None];
-    fold(&mut acc, &[Some(vec![-0.0, 1.0]), None]);
-    fold(&mut acc, &[None, Some(vec![-0.0])]);
+    // From the first micro-step's gradient, never from an extra zero: −0 stays −0 ...
+    let mut acc: Part = vec![None, None, None];
+    fold(&mut acc, &[Some(vec![-0.0, 1.0]), None, None], false);
     assert_eq!(acc[0].as_ref().map(|v| bits(v)), Some(bits(&[-0.0, 1.0])));
-    assert_eq!(acc[1].as_ref().map(|v| bits(v)), Some(bits(&[-0.0])));
+    // ... and an absent gradient counts as zeros: −0 + 0 = +0, 0 + (−0) = +0.
+    fold(&mut acc, &[None, Some(vec![-0.0]), None], true);
+    assert_eq!(acc[0].as_ref().map(|v| bits(v)), Some(bits(&[0.0, 1.0])));
+    assert_eq!(acc[1].as_ref().map(|v| bits(v)), Some(bits(&[0.0])));
+    assert!(acc[2].is_none(), "untouched so far");
     // One micro-step passes through bit for bit, NaN payload included, also under the mean.
     let vars = {
         let mut v = VarMap::new();
@@ -133,6 +136,42 @@ fn accumulation_equals_the_engines_own_additions() {
     // The order matters for these values (so the tests above can see a wrong order).
     let rev = fold_in(&[order_sensitive(2, 6), order_sensitive(1, 6), order_sensitive(0, 6)]);
     assert_ne!(bits(&rev), bits(&fold_in(&[order_sensitive(0, 6), order_sensitive(1, 6), order_sensitive(2, 6)])));
+}
+
+/// One process's sum with zeros in place of absent gradients, through the engine's own tensor
+/// additions: `((z₀ + g₁) + z₂) + …`, then `div_scalar(M)`; None for a var absent everywhere.
+fn zero_filled_mean(vars: &VarMap, micro: &[Vec<Option<Tensor>>]) -> Vec<Option<Tensor>> {
+    (0..vars.len())
+        .map(|v| {
+            if micro.iter().all(|g| g[v].is_none()) {
+                return None;
+            }
+            let z = || vars.tensors()[v].zeros_like();
+            let mut acc = micro[0][v].clone().unwrap_or_else(z);
+            for g in &micro[1..] {
+                acc = acc + g[v].clone().unwrap_or_else(z);
+            }
+            Some(if micro.len() == 1 { acc } else { acc.div_scalar(micro.len() as f64) })
+        })
+        .collect()
+}
+
+#[test]
+fn absent_gradients_count_as_zeros() {
+    // micro_grads: var "b" absent in odd micro-steps, var "c" present only in micro-step 2; the
+    // values hold −0s. GradSum equals the zero-filled sum of the engine's own additions, bit for
+    // bit, for every first micro-step (so absent first, absent last and absent everywhere occur).
+    let vars = small_vars();
+    for first in 0..4 {
+        for m in 1..=4 {
+            let micro: Vec<Vec<Option<Tensor>>> = (first..first + m).map(micro_grads).collect();
+            let mut s = GradSum::new(&vars);
+            for g in &micro {
+                s.add(g.clone()).unwrap();
+            }
+            assert_eq!(grads_bits(&s.finish(Reduce::Mean)), grads_bits(&zero_filled_mean(&vars, &micro)), "micro-steps {first}..{}", first + m);
+        }
+    }
 }
 
 #[test]
@@ -436,6 +475,52 @@ fn gate_loss(cfg: &DecoderConfig, lifted: &VarMap, items: &[usize], train_step: 
     masked_cross_entropy(out.logits, &targets, &mask).sum()
 }
 
+/// The gate's vars and optimizer; with `absent`, an extra var "branch.w" `[S, 4]` that only some
+/// micro-steps use (see `gate_micro`).
+fn gate_state(absent: bool) -> (VarMap, Adam) {
+    let (_, mut vars) = Decoder::init(gate_cfg(), GATE_SEEDS, 5).unwrap();
+    if absent {
+        vars.insert("branch.w", Tensor::from_data((0..GATE_SEEDS * 4).map(|i| 0.1 * i as f32 - 0.3).collect(), [GATE_SEEDS, 4])).unwrap();
+    }
+    let adam = Adam::new(AdamConfig { lr: 1e-2, ..AdamConfig::default() }, ParamGroups::new(&vars), &vars);
+    (vars, adam)
+}
+
+/// Global micro-step j of step `step` (of `micro`): the gate's loss and, with `absent`, a branch
+/// taken only when `(step + j) % 3 == 1`, adding `sum(branch.w · c)` whose gradient `c` holds
+/// −0 and +0. Elsewhere "branch.w" has no gradient; with 2 micro-steps every third step has
+/// none at all.
+fn gate_micro(cfg: &DecoderConfig, lifted: &VarMap, items: &[usize], step: u64, j: u64, micro: usize, absent: bool) -> Tensor {
+    let loss = gate_loss(cfg, lifted, items, step * micro as u64 + j);
+    if absent && (step + j) % 3 == 1 {
+        let c: Vec<f32> = (0..GATE_SEEDS).flat_map(|_| [-0.0, 0.5 * (j + 1) as f32, -0.25, 0.0]).collect();
+        loss + (lifted.var("branch.w").clone() * Tensor::from_data(c, [GATE_SEEDS, 4])).sum()
+    } else {
+        loss
+    }
+}
+
+/// The reference for the absent-gradient gate: one process, the micro-steps' gradients summed
+/// by `zero_filled_mean` (tensor additions, zeros for absent gradients), no `GradSum`; the final
+/// vars' hash.
+fn absent_reference(micro: usize, steps: u64) -> String {
+    let cfg = gate_cfg();
+    let (mut vars, mut adam) = gate_state(true);
+    let shard = Shard::new(ShardSpec { seed: 11, items: 24, micro_batch: 2, micro_steps: micro }, 0, 1).unwrap();
+    for step in 0..steps {
+        let grads: Vec<Vec<Option<Tensor>>> = (0..micro)
+            .map(|j| {
+                let lifted = vars.lifted();
+                let g = gate_micro(&cfg, &lifted, &shard.batch(step, j), step, j as u64, micro, true).backward();
+                lifted.grads(&g)
+            })
+            .collect();
+        let summed = zero_filled_mean(&vars, &grads);
+        crate::nn::Optimizer::step(&mut adam, &mut vars, summed, 1.0);
+    }
+    state_hash(&vars).unwrap()
+}
+
 #[test]
 fn one_process_with_one_micro_step_equals_the_plain_trainer() {
     // data_parallel_step on the single-process group with one micro-step against nn::train_step:
@@ -634,12 +719,12 @@ fn body_ddp_worker() {
         let (r, s) = v.split_once(':').unwrap();
         (r.parse::<usize>().unwrap(), s.parse::<u64>().unwrap())
     });
+    let absent = std::env::var("DIST_TEST_ABSENT").is_ok();
     crate::tensor::pin_reference();
-    let mut g = ProcessGroup::from_env(GroupOptions { job_key: format!("gate micro={micro}"), ..opts("") }).unwrap();
+    let mut g = ProcessGroup::from_env(GroupOptions { job_key: format!("gate micro={micro} absent={absent}"), ..opts("") }).unwrap();
     let (rank, world) = (g.rank(), g.world_size());
     let cfg = gate_cfg();
-    let (_, mut vars) = Decoder::init(cfg.clone(), GATE_SEEDS, 5).unwrap();
-    let mut adam = Adam::new(AdamConfig { lr: 1e-2, ..AdamConfig::default() }, ParamGroups::new(&vars), &vars);
+    let (mut vars, mut adam) = gate_state(absent);
     check_in_sync(&mut g, &vars).unwrap();
     // The shards: every rank checks every rank's shard hash for this run's steps.
     let sp = ShardSpec { seed: 11, items: 24, micro_batch: 2, micro_steps: micro };
@@ -669,7 +754,7 @@ fn body_ddp_worker() {
         data_parallel_step(&mut g, &mut vars, &mut adam, k, Reduce::Mean, 1.0, |lifted, i| {
             // Dropout masks from the global micro-step, never the rank's.
             let j = shard.global_micro(i) as u64;
-            gate_loss(&cfg, lifted, &shard.batch(step, i), step * micro as u64 + j)
+            gate_micro(&cfg, lifted, &shard.batch(step, i), step, j, micro, absent)
         })
         .unwrap();
         let h = check_in_sync(&mut g, &vars).unwrap();
@@ -761,6 +846,30 @@ fn gate_world_sizes_1_2_4_equal_one_process_with_accumulation() {
         }
     }
     assert_ne!(got["m2-one-process"].0, got["m4-one-process"].0, "2 and 4 micro-steps train differently");
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+/// The gate for absent gradients: a var some micro-steps do not use (and, at 2 micro-steps, every
+/// third step none) at world sizes 1, 2 and 4 gives the bits of one process that puts zeros in
+/// place of the absent gradients and adds with the engine's own tensor additions.
+#[test]
+fn gate_absent_gradients_equal_one_process_with_zeros() {
+    let _guard = procs();
+    let steps = 9;
+    let root = scratch("absent");
+    for (micro, worlds) in [(2usize, [1usize, 2].as_slice()), (4, [1, 2, 4].as_slice())] {
+        let want = absent_reference(micro, steps as u64);
+        for &w in worlds {
+            let out = root.join(format!("m{micro}-w{w}"));
+            std::fs::create_dir_all(&out).unwrap();
+            Gate::new(w, 1, micro, steps).with("DIST_TEST_ABSENT", 1).run(&out);
+            let (fin, per_step) = results(&out, w);
+            let got = crate::hash::sha256_hex(fin.as_bytes());
+            eprintln!("absent gate M {micro} W {w}: final weights sha256 {got} (one process with zeros {want})");
+            assert_eq!(got, want, "M {micro}, W {w}");
+            assert_eq!(per_step.len(), steps);
+        }
+    }
     std::fs::remove_dir_all(&root).unwrap();
 }
 

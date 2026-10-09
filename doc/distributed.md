@@ -38,7 +38,7 @@ check_in_sync(&mut group, &vars)?;
 
 ## Determinism rules (deterministic mode, the only mode so far)
 
-1. **One order for the sum.** A step's gradient is the left fold over its global micro-steps, `((g₀ + g₁) + g₂) + …`, elementwise in f32. Rank r's i-th of k micro-steps is global micro-step `r·k + i`. The fold starts from the first contribution (never from zeros, which would turn −0 into +0); a var without a gradient in a micro-step adds nothing; a var no micro-step touched stays `None` (the optimizer skips it, as it does today).
+1. **One order for the sum.** A step's gradient is the left fold over its global micro-steps, `((g₀ + g₁) + g₂) + …`, elementwise in f32. Rank r's i-th of k micro-steps is global micro-step `r·k + i`. The fold starts from the first micro-step's gradient (never from an extra zero, which would turn −0 into +0). A var without a gradient in a micro-step (it took no part: a branch not taken, a var unused by that batch) counts as zeros, so the sum is bit for bit the one a single process gets by putting zeros in place of the absent gradients and adding them (`x + 0` included, which turns −0 into +0). A var no micro-step touched stays `None`, and the optimizer skips it, as it does today and as torch does for a parameter unused on every rank.
 2. **One routine.** `GradSum` is the only place gradients are added, for local accumulation and for the all-reduce. `Reduce::Mean` divides by the number of global micro-steps as `Tensor::div_scalar` does, and not at all when there is one (so a single micro-step passes through bit for bit).
 3. **Rank order across the network.** The all-reduce passes the running sum along the ranks: rank 0 sends its sum to rank 1, which folds its own micro-steps in, in order, and sends it on; the last rank sends the total to every other rank once it has all of it. Large sums travel in chunks so the ranks work at the same time; chunking changes the pipelining, never the order of the additions. A rank after the first therefore keeps its micro-steps apart until the running sum reaches it (`ProcessGroup::grad_sum` gives that kind of sum; pre-adding them is refused).
 4. **Identical optimizer steps.** Every rank applies the same optimizer to the same summed gradient, so the vars stay identical without being sent. `check_in_sync` verifies it, and every coordinated checkpoint verifies it again.
@@ -89,11 +89,20 @@ Resuming either checkpoint with one process is refused (a resume keeps the world
 
 **Collectives** (`collectives_are_rank_order_exact_at_world_sizes_1_2_4`, ranks as threads over localhost TCP): at W = 1, 2, 4 and with chunks of 2²⁰ and 5 elements, the all-reduce equals the rank-order fold bit for bit on order-sensitive values; broadcast from every root and all-gather return the expected bytes in rank order. `the_gradient_all_reduce_folds_the_global_micro_steps_in_order`: 4 global micro-steps as 1 × 4, 2 × 2 and 4 × 1 (with absent gradients) give the same bits as one process.
 
+**Absent gradients** (`gate_absent_gradients_equal_one_process_with_zeros`): the gate's model plus a var used only in the micro-steps where `(step + j) mod 3 = 1` (j the global micro-step), whose gradient holds −0 and +0; at 2 micro-steps every third step leaves it untouched on every rank. 9 steps. The reference is one process that puts zeros in place of the absent gradients and adds them with the engine's own tensor additions (no `GradSum`).
+
+| Global micro-steps | World sizes | Final weights (all equal to the reference) |
+|---|---|---|
+| 2 | 1, 2 | `7c61a7994ceb0d787ef5ca45a5fd604075a5d3f21c1cf84add0cd59ee590d67c` |
+| 4 | 1, 2, 4 | `0ad5e705faca0758a2d0fd8dc06a82106a99c5c3f4d1962417e0e2f27f79d3e7` |
+
+`absent_gradients_count_as_zeros` checks the same at the gradient level, bit for bit, for absent-first, absent-last and absent-everywhere cases.
+
 **Refusals and failures:** another job key or world size at the rendezvous (refused on every rank, with the reason), mismatched collectives, a rank that leaves (its peers fail at once), a later rank that pre-added its micro-steps, a failing rank under the launcher (the job stops; the others are killed), a changed byte in a checkpoint (sha256 mismatch).
 
 **The example** (`examples/ddp_copy_task.rs`, 200 steps, 4 global micro-steps of 8 items): final weights sha256 `7d4c24b808b50f964754c8c2e6a674ba7b82e91af96023a9649ad0ea22be6012` alone, under the launcher with 2 processes and with 4, on every rank.
 
-The whole gate (20 tests) runs in about 3 s: `cargo test --release --lib nn::dist`.
+The whole gate (22 tests) runs in about 3 s: `cargo test --release --lib nn::dist`.
 
 ## Single-device behaviour is unchanged
 

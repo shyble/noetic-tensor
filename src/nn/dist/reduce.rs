@@ -1,11 +1,14 @@
 //! The one ordered gradient sum, shared by local accumulation and the all-reduce.
 //!
 //! A step's gradient is the left fold, over its micro-steps in order, of their gradient sets:
-//! `((g₀ + g₁) + g₂) + …`, elementwise in f32, per var. The fold starts from the first micro-step
-//! that has a gradient for the var (never from zeros, which would turn a −0 into +0), and a
-//! micro-step without one (the var took no part) adds nothing; a var no micro-step touched stays
-//! `None`. `Reduce::Mean` then divides by the number of micro-steps, as `Tensor::div_scalar` does
-//! (skipped when there was one, so a single micro-step passes its gradient through bit for bit).
+//! `((g₀ + g₁) + g₂) + …`, elementwise in f32, per var. The fold starts from the first micro-step's
+//! gradient (never from an extra zero, which would turn a −0 into +0). A micro-step in which a var
+//! took no part (its gradient is absent) counts as zeros: the sum is the one a single process gets
+//! by putting zeros in place of the absent gradients, bit for bit (`x + 0` included, which turns
+//! a −0 into +0). A var no micro-step touched stays `None`, so the optimizer skips it, as torch
+//! does for a parameter unused on every rank. `Reduce::Mean` then divides by the number of
+//! micro-steps, as `Tensor::div_scalar` does (skipped when there was one, so a single micro-step
+//! passes its gradient through bit for bit).
 //!
 //! Across ranks the micro-steps are ordered by rank, then by their order on the rank: rank r's
 //! i-th of k micro-steps is the global micro-step `r·k + i`. One process with W·k micro-steps and
@@ -31,24 +34,32 @@ impl Slot {
 /// A gradient set on the host: per var, its f32 values or None.
 pub(crate) type Part = Vec<Option<Vec<f32>>>;
 
-/// Fold `part` into `acc`, var by var: the one addition of the ordered sum.
-pub(crate) fn fold(acc: &mut [Option<Vec<f32>>], part: &[Option<Vec<f32>>]) {
+/// Fold micro-step `part` into `acc`, var by var: the one addition of the ordered sum.
+/// `after_first` says whether an earlier micro-step (on any rank) went into `acc`.
+pub(crate) fn fold(acc: &mut [Option<Vec<f32>>], part: &[Option<Vec<f32>>], after_first: bool) {
     debug_assert_eq!(acc.len(), part.len());
     for (a, p) in acc.iter_mut().zip(part) {
-        fold_var(a, p.as_deref());
+        fold_var(a, p.as_deref(), after_first);
     }
 }
 
-/// Fold one var's contribution into its running sum.
-pub(crate) fn fold_var(acc: &mut Option<Vec<f32>>, part: Option<&[f32]>) {
+/// Fold one var's contribution into its running sum, an absent one (None) as zeros. A `None`
+/// sum after the first micro-step stands for zeros (every earlier micro-step was absent).
+pub(crate) fn fold_var(acc: &mut Option<Vec<f32>>, part: Option<&[f32]>, after_first: bool) {
     match (acc.as_mut(), part) {
         (Some(a), Some(p)) => {
             for (x, y) in a.iter_mut().zip(p) {
                 *x += *y;
             }
         }
+        (Some(a), None) => {
+            for x in a.iter_mut() {
+                *x += 0.0;
+            }
+        }
+        (None, Some(p)) if after_first => *acc = Some(p.iter().map(|y| 0.0 + *y).collect()),
         (None, Some(p)) => *acc = Some(p.to_vec()),
-        _ => {}
+        (None, None) => {}
     }
 }
 
@@ -140,7 +151,7 @@ impl GradSum {
         } else {
             match &mut self.acc {
                 None => self.acc = Some(part),
-                Some(acc) => fold(acc, &part),
+                Some(acc) => fold(acc, &part, true),
             }
         }
     }
@@ -177,7 +188,7 @@ impl GradSum {
             for p in std::mem::take(&mut self.pending) {
                 match &mut acc {
                     None => acc = Some(p),
-                    Some(a) => fold(a, &p),
+                    Some(a) => fold(a, &p, true),
                 }
             }
             self.acc = acc;
