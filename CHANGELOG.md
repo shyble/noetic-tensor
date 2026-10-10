@@ -1,6 +1,6 @@
 # Changes
 
-## Unreleased
+## 0.4.0
 
 **Data-parallel ranks on a GPU** (`nn::dist`, deterministic mode only): built; tested on one machine per GPU kind (CUDA: Windows x86_64, one RTX 4060 Laptop GPU shared by up to four processes; Metal: macOS aarch64, one Apple GPU shared by two processes; shown: the same training twice byte-identical on the GPU, and byte-identical weights and per-step hashes for 2 and 4 ranks against 1 GPU with accumulation, with absent gradients (−0 and +0), an idle weight under AdamW's decay, gradient clipping, and a killed and resumed run under AdamW and under SGD with momentum); multi-GPU, multi-machine and datacenter runs untested (no multi-GPU machine available yet). Windows ran every gate with no skips; the Mac, shared with a long benchmark, skipped the runs needing 4 processes at once. See "GPU ranks" in `doc/distributed.md`.
 

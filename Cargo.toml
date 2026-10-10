@@ -1,6 +1,6 @@
 [package]
 name = "noetic-tensor"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 description = "A deterministic tensor engine with reverse-mode autodiff and a neural-network library, on the CPU, Apple Metal and NVIDIA CUDA, with almost no dependencies."
 license = "MIT OR Apache-2.0"

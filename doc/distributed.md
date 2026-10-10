@@ -1,6 +1,6 @@
 # Distributed training: deterministic data parallelism (first step)
 
-Released in 0.3.0 (9 October 2026) for the CPU. Unreleased: ranks on a GPU, one device per rank (see "GPU ranks" below); built; tested on one machine per GPU kind (CUDA: up to four processes sharing one RTX 4060 Laptop GPU on Windows; Metal: two processes sharing one Apple GPU on macOS; shown: byte-identical weights to one GPU with accumulation, with absent gradients, an idle weight under decay, clipping, and a killed and resumed run under AdamW and under SGD with momentum); multi-GPU, multi-machine and datacenter runs untested (no multi-GPU machine available yet).
+Released in 0.3.0 (9 October 2026) for the CPU. Released in 0.4.0 (10 October 2026): ranks on a GPU, one device per rank (see "GPU ranks" below); built; tested on one machine per GPU kind (CUDA: up to four processes sharing one RTX 4060 Laptop GPU on Windows; Metal: two processes sharing one Apple GPU on macOS; shown: byte-identical weights to one GPU with accumulation, with absent gradients, an idle weight under decay, clipping, and a killed and resumed run under AdamW and under SGD with momentum); multi-GPU, multi-machine and datacenter runs untested (no multi-GPU machine available yet).
 
 ## What it adds
 
@@ -12,14 +12,14 @@ Released in 0.3.0 (9 October 2026) for the CPU. Unreleased: ranks on a GPU, one 
 | `ProcessGroup` | The rendezvous, a full mesh of TCP connections, and the collectives: `barrier`, `broadcast`, `all_gather`, `all_reduce_f32`, `all_reduce_grads`. `ProcessGroup::single()` (and `from_env` with distribution off) opens no socket; its collectives are the identity. |
 | `GradSum`, `Reduce` | The one ordered gradient sum, used by local accumulation and by the all-reduce. |
 | `data_parallel_step` | One optimizer step: this rank's micro-steps, the all-reduce, the same optimizer step on every rank. With the single-process group it is gradient accumulation. |
-| `data_parallel_grads` | Unreleased. The summed gradients of a step, the same on every rank, for a caller that transforms them (clips them) before its optimizer steps. |
+| `data_parallel_grads` | Since 0.4.0. The summed gradients of a step, the same on every rank, for a caller that transforms them (clips them) before its optimizer steps. |
 | `check_in_sync`, `state_hash` | Every rank holds the same vars, bit for bit (all-gather of a sha256 of the saved vars). |
 | `Shard`, `ShardSpec` | The distributed sampler: each rank's micro-batches, from (seed, rank, world size) only; a sha256 per shard. |
-| `Checkpoint`, `CheckpointOptimizer` | Coordinated checkpoints: vars, the optimizer's whole state (Adam's moments and step count; unreleased: SGD's momentum buffers), every rank's loader cursor. |
+| `Checkpoint`, `CheckpointOptimizer` | Coordinated checkpoints: vars, the optimizer's whole state (Adam's moments and step count; since 0.4.0, SGD's momentum buffers), every rank's loader cursor. |
 | `LaunchConfig`, `spawn`, `run`, `Job` | A torchrun-style launcher: N processes per node, rendezvous variables and the job's secret set, a log per rank; the first failure stops the job. |
 | `JobSecret`, `platform_key` | The per-job secret of the authenticated handshake; the platform key every rank must share. |
-| `GroupOptions::new`, `with_*` | Unreleased. `GroupOptions` is `#[non_exhaustive]`: made with `new` (or `default`) and the `with_*` methods, so later fields do not break callers; its fields stay public to read and set. |
-| `DeviceKind`, `DistEnv::device`, `GroupOptions::device`, `device_key` | Unreleased. The rank's device from its rank on the node (torchrun's `cuda:LOCAL_RANK`), the group's device, and the device's part of the platform key (`device=…`, none for the CPU reference backend). |
+| `GroupOptions::new`, `with_*` | Since 0.4.0. `GroupOptions` is `#[non_exhaustive]`: made with `new` (or `default`) and the `with_*` methods, so later fields do not break callers; its fields stay public to read and set. |
+| `DeviceKind`, `DistEnv::device`, `GroupOptions::device`, `device_key` | Since 0.4.0. The rank's device from its rank on the node (torchrun's `cuda:LOCAL_RANK`), the group's device, and the device's part of the platform key (`device=…`, none for the CPU reference backend). |
 | `examples/launch.rs` | The launcher as a command: `launch --nproc-per-node N [--nnodes M --node-rank I --master-addr A --master-port P] [--log-dir D] [--secret-file F | --no-auth] -- <command> [args]`. |
 | `examples/ddp_copy_task.rs` | The copy task trained data-parallel; the same weights at 1, 2 and 4 processes. |
 
@@ -126,7 +126,7 @@ Resuming either checkpoint with one process is refused (a resume keeps the world
 
 The whole gate (27 distributed tests, plus the HMAC vectors) runs in about 5 s: `cargo test --release --lib nn::dist`.
 
-## GPU ranks (unreleased)
+## GPU ranks (0.4.0)
 
 Status: built; tested on one machine per GPU kind (the configurations and results below); multi-GPU, multi-machine and datacenter runs untested (no multi-GPU machine available yet). GPU results are keyed apart from CPU results and are never compared byte for byte with them.
 
@@ -200,13 +200,13 @@ These gates show the order of the sum and the checkpoint path on a GPU. They do 
 - All 88 existing library tests and the README doctests pass.
 - Six training configurations (decoder, MoE decoder, decoder with dropout; each with AdamW and SGD with momentum; 60 steps, 3 models on the seed axis) give byte-identical final vars and logits built against 0.2.0 and against this branch; the copy-task example's output is identical.
 - `data_parallel_step` with the single-process group and one micro-step equals `nn::train_step` bit for bit (vars and Adam moments, `one_process_with_one_micro_step_equals_the_plain_trainer`).
-- **GPU ranks (unreleased):** the same six configurations give byte-identical final vars and logits built against 0.3.0 and against the GPU-ranks change (0.3.0 built and run now as the reference, on the same machine and device), on the CPU reference backend (macOS aarch64 and Windows x86_64), on CUDA (`Cuda(0)`, Windows) and on Metal (macOS). The CPU gates above give the same hashes as 0.3.0 (on Windows every one of them; on the Mac those that run in at most 2 processes at once, see the machine note in the change log), and the CPU key is unchanged. The other changes outside `nn::dist`: `tensor::gpu_platform_key`, the CUDA backend on `Cuda(i)` (one device per process), NVML loaded at run time, `Sgd::set_buffers`; no kernel source changes.
+- **GPU ranks (0.4.0):** the same six configurations give byte-identical final vars and logits built against 0.3.0 and against the GPU-ranks change (0.3.0 built and run now as the reference, on the same machine and device), on the CPU reference backend (macOS aarch64 and Windows x86_64), on CUDA (`Cuda(0)`, Windows) and on Metal (macOS). The CPU gates above give the same hashes as 0.3.0 (on Windows every one of them; on the Mac those that run in at most 2 processes at once, see the machine note in the change log), and the CPU key is unchanged. The other changes outside `nn::dist`: `tensor::gpu_platform_key`, the CUDA backend on `Cuda(i)` (one device per process), NVML loaded at run time, `Sgd::set_buffers`; no kernel source changes.
 
 ## For the release notes
 
 - adds the variant NnError::Dist
 - public API additions (`nn::dist`, among them `GroupOptions` with public fields `platform` and `secret`, `JobSecret`, `platform_key`, `LaunchConfig::secret`): a public API change, so the release carrying them needs a minor version bump
-- unreleased (GPU ranks): `GroupOptions` gains the public field `device` and is `#[non_exhaustive]` with a builder (`new`, `with_*`; struct literals no longer compile outside the crate); `DeviceKind`, `DistEnv::device`, `device_key`, `ProcessGroup::device` and `ProcessGroup::platform`, `data_parallel_grads`, `CheckpointOptimizer`, `Sgd::set_buffers`, `tensor::gpu_platform_key`; `Checkpoint::save` and `restore` take any `CheckpointOptimizer` (Adam or SGD), `Checkpoint` holds `optimizer_state` in place of `adam_m` and `adam_v`, and `CheckpointMeta` gains `optimizer`; NVML is loaded at run time and `device_key` is an error without it; `Cuda(i)` with i > 0 is accepted (one device per process, untested) where 0.3.0 refused it; a resume under another group key, or into another kind of optimizer, is refused
+- 0.4.0 (GPU ranks): `GroupOptions` gains the public field `device` and is `#[non_exhaustive]` with a builder (`new`, `with_*`; struct literals no longer compile outside the crate); `DeviceKind`, `DistEnv::device`, `device_key`, `ProcessGroup::device` and `ProcessGroup::platform`, `data_parallel_grads`, `CheckpointOptimizer`, `Sgd::set_buffers`, `tensor::gpu_platform_key`; `Checkpoint::save` and `restore` take any `CheckpointOptimizer` (Adam or SGD), `Checkpoint` holds `optimizer_state` in place of `adam_m` and `adam_v`, and `CheckpointMeta` gains `optimizer`; NVML is loaded at run time and `device_key` is an error without it; `Cuda(i)` with i > 0 is accepted (one device per process, untested) where 0.3.0 refused it; a resume under another group key, or into another kind of optimizer, is refused
 
 ## Known limits and next steps
 
@@ -215,5 +215,5 @@ These gates show the order of the sum and the checkpoint path on a GPU. They do 
 - **The OS maths library.** softmax, log_softmax and `powf` call the platform's `exp`, `log` and `pow`, whose last bits may differ between operating systems or library versions. The gate runs on one machine, so it is unaffected. Between machines, the rendezvous refuses ranks whose maths library fingerprint differs (the fingerprint samples the functions on fixed inputs; it can miss a difference elsewhere, which `check_in_sync` then reports as an error rather than letting the ranks drift). Mixed-platform jobs need the engine's own implementations of these functions.
 - **Throughput.** The running sum passes the ranks one after another (latency rises with W) and the last rank sends the total to each rank (its traffic rises with W). Both keep the order; a tree or ring broadcast of the total, bucketing and overlap with the backward pass are later work and must not change the order of the additions.
 - **Memory.** A rank after the first keeps its k micro-step gradients until the running sum arrives (k copies of the gradients; with one micro-step per rank, none extra).
-- **Checkpoints.** Rank 0 is the single writer; node copies are optional and checked. The optimizer states saved are Adam's and SGD's (unreleased); another optimizer cannot be checkpointed (it does not implement `CheckpointOptimizer`).
+- **Checkpoints.** Rank 0 is the single writer; node copies are optional and checked. The optimizer states saved are Adam's and SGD's (SGD's since 0.4.0); another optimizer cannot be checkpointed (it does not implement `CheckpointOptimizer`).
 - **Not yet built:** reduce-scatter, sharded optimizer state and parameters (FSDP-style), elastic restart, a fast mode, generic callbacks (batch seen, checkpoint reached), NCCL.
