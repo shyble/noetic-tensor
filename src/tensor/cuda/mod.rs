@@ -1,5 +1,5 @@
-//! The CUDA backend. `backend` implements `GpuBackend` (tensors on
-//! `Device::Cuda(0)`); the rest of this file is the raw device API: a device with its primary context, one stream and one
+//! The CUDA backend. `backend` implements `GpuBackend` (tensors on one
+//! `Device::Cuda(i)` per process, `Cuda(0)` unless the first use names another); the rest of this file is the raw device API: a device with its primary context, one stream and one
 //! cuBLAS handle; f32 buffers; kernels compiled at run time by NVRTC (vector add and a tiled
 //! sgemm of our own) and cuBLAS sgemm. Behind the `cuda` feature (off by default); nothing here
 //! is reachable from `Tensor` (tensors reach the GPU through `Storage::Gpu` and `backend`).
@@ -503,4 +503,28 @@ impl Drop for Inner {
             cuDevicePrimaryCtxRelease_v2(self.dev);
         }
     }
+}
+
+/// The NVIDIA driver's release (e.g. "576.88"), from NVML (part of the driver), read once.
+pub(crate) fn driver_release() -> Result<String> {
+    static R: std::sync::OnceLock<std::result::Result<String, String>> = std::sync::OnceLock::new();
+    R.get_or_init(|| {
+        let mut buf = [0 as std::ffi::c_char; 96];
+        // SAFETY: NVML's init and shutdown are reference counted; the buffer outlives the call
+        // and its length is passed.
+        unsafe {
+            let r = nvmlInit_v2();
+            if r != NVML_SUCCESS {
+                return Err(format!("nvmlInit: status {r}"));
+            }
+            let r = nvmlSystemGetDriverVersion(buf.as_mut_ptr(), buf.len() as std::ffi::c_uint);
+            nvmlShutdown();
+            if r != NVML_SUCCESS {
+                return Err(format!("nvmlSystemGetDriverVersion: status {r}"));
+            }
+            Ok(CStr::from_ptr(buf.as_ptr()).to_string_lossy().into_owned())
+        }
+    })
+    .clone()
+    .map_err(|e| dev_err("NVML", e))
 }

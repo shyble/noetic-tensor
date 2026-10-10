@@ -472,4 +472,8 @@ impl GpuBackend for MetalBackend {
         let src = crate::hash::sha256_hex(super::shaders::SOURCE.as_bytes());
         Ok(format!("metal-{}-mathmode-safe-kernels-{}", c.name().replace(' ', "_"), &src[..16]))
     }
+
+    fn platform_details(&self) -> Result<String> {
+        Ok(ctx()?.platform_details())
+    }
 }

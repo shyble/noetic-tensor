@@ -23,6 +23,7 @@ use super::reduce::{fold, fold_var, GradSum, Part};
 use super::wire::{self, Dec, Enc, Op};
 use crate::error::{NnError, Result};
 use crate::nn::VarMap;
+use crate::tensor::{CpuMode, Device};
 use std::net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
 use std::time::{Duration, Instant};
 
@@ -38,8 +39,14 @@ pub struct GroupOptions {
     pub connect_timeout: Duration,
     /// The all-reduce's chunk, in elements (pipelining only; the sum's order does not depend on it).
     pub chunk_elems: usize,
-    /// The platform key every rank must share (`platform_key()`; leave the default).
+    /// The platform key every rank must share (`platform_key()`; leave the default). The
+    /// device's part (`device_key(device)`) is added to it by the group.
     pub platform: String,
+    /// The device this rank trains on (`DistEnv::device`): its vars, gradients and optimizer
+    /// state live there. The CPU reference backend by default. Its kind, model and versions enter
+    /// the group's key, so the ranks of a job train on one kind and model of device, and CPU and
+    /// GPU runs are keyed apart.
+    pub device: Device,
     /// The job's secret for the authenticated handshake; None reads `DIST_JOB_SECRET` in
     /// `from_env`, and without one the job is unauthenticated (isolated development networks
     /// only).
@@ -48,7 +55,7 @@ pub struct GroupOptions {
 
 impl Default for GroupOptions {
     fn default() -> Self {
-        GroupOptions { job_key: String::new(), timeout: Duration::from_secs(600), connect_timeout: Duration::from_secs(120), chunk_elems: 1 << 20, platform: super::env::platform_key(), secret: None }
+        GroupOptions { job_key: String::new(), timeout: Duration::from_secs(600), connect_timeout: Duration::from_secs(120), chunk_elems: 1 << 20, platform: super::env::platform_key(), device: Device::Cpu(CpuMode::Reference), secret: None }
     }
 }
 
@@ -57,6 +64,8 @@ impl Default for GroupOptions {
 pub struct ProcessGroup {
     env: DistEnv,
     opts: GroupOptions,
+    /// The platform key the ranks share: `opts.platform` and the device's part.
+    platform: String,
     /// By rank; None for this process.
     peers: Vec<Option<TcpStream>>,
     seq: u64,
@@ -200,7 +209,17 @@ fn decode_chunk(c: usize, segs: &Chunk, payload: &[u8]) -> Result<Vec<Option<Vec
 impl ProcessGroup {
     /// The group of one process: no network; every collective is the identity.
     pub fn single() -> ProcessGroup {
-        ProcessGroup { env: DistEnv::single(), opts: GroupOptions::default(), peers: vec![None], seq: 0, checks: WeightChecks::default() }
+        let opts = GroupOptions::default();
+        ProcessGroup { env: DistEnv::single(), platform: opts.platform.clone(), opts, peers: vec![None], seq: 0, checks: WeightChecks::default() }
+    }
+
+    /// The platform key of a rank with these options: `opts.platform`, and the device's part
+    /// for a device other than the CPU reference backend (`device_key`).
+    fn rank_platform(opts: &GroupOptions) -> Result<String> {
+        Ok(match super::env::device_key(opts.device)? {
+            None => opts.platform.clone(),
+            Some(d) => format!("{} {d}", opts.platform),
+        })
     }
 
     /// The group the environment describes (`DistEnv::from_env`), or the single-process group
@@ -210,7 +229,7 @@ impl ProcessGroup {
             opts.secret = JobSecret::from_env()?;
         }
         match DistEnv::from_env()? {
-            None => Ok(ProcessGroup { opts, ..ProcessGroup::single() }),
+            None => Ok(ProcessGroup { platform: ProcessGroup::rank_platform(&opts)?, opts, ..ProcessGroup::single() }),
             Some(env) => ProcessGroup::init(&env, opts),
         }
     }
@@ -221,8 +240,9 @@ impl ProcessGroup {
         if world == 0 || rank >= world {
             return Err(NnError::Dist(format!("rank {rank} is not in 0..{world}")));
         }
+        let platform = ProcessGroup::rank_platform(&opts)?;
         if world == 1 {
-            return Ok(ProcessGroup { env: env.clone(), opts, peers: vec![None], seq: 0, checks: WeightChecks::default() });
+            return Ok(ProcessGroup { env: env.clone(), opts, platform, peers: vec![None], seq: 0, checks: WeightChecks::default() });
         }
         let deadline = Instant::now() + opts.connect_timeout;
         let master = resolve(&env.master_addr, env.master_port)?;
@@ -247,7 +267,7 @@ impl ProcessGroup {
                 wire::send(&mut s, Op::Challenge, 0, 0, &e.0)?;
                 let (op, _, _, payload) = wire::recv_any(&mut s, 0, usize::MAX)?;
                 let mut d = Dec::new(&payload);
-                let (r, w, key, platform, addr, theirs) = (d.u64()? as usize, d.u64()? as usize, d.str()?, d.str()?, d.str()?, d.bytes()?.to_vec());
+                let (r, w, key, their_platform, addr, theirs) = (d.u64()? as usize, d.u64()? as usize, d.str()?, d.str()?, d.str()?, d.bytes()?.to_vec());
                 let fields = payload[..d.at()].to_vec();
                 let proof = d.bytes()?.to_vec();
                 d.done()?;
@@ -259,8 +279,8 @@ impl ProcessGroup {
                     Some(format!("rank {r} has world size {w}, rank 0 has {world}"))
                 } else if key != opts.job_key {
                     Some(format!("rank {r} has job key {key:?}, rank 0 has {:?}", opts.job_key))
-                } else if platform != opts.platform {
-                    Some(format!("rank {r} runs on platform {platform:?}, rank 0 on {:?} (a mixed job)", opts.platform))
+                } else if their_platform != platform {
+                    Some(format!("rank {r} runs on platform {their_platform:?}, rank 0 on {platform:?} (a mixed job)"))
                 } else if r == 0 || r >= world || joined[r].is_some() {
                     Some(format!("a second rank {r} (or one outside 1..{world})"))
                 } else {
@@ -318,7 +338,7 @@ impl ProcessGroup {
             d.done()?;
             let mine = auth::challenge();
             let mut e = Enc::default();
-            e.u64(rank as u64).u64(world as u64).str(&opts.job_key).str(&opts.platform).str(&TcpListener::local_addr(&data).map_err(dist("listener"))?.to_string()).bytes(&mine);
+            e.u64(rank as u64).u64(world as u64).str(&opts.job_key).str(&platform).str(&TcpListener::local_addr(&data).map_err(dist("listener"))?.to_string()).bytes(&mine);
             let proof = auth::answer(secret, "hello", &theirs, &e.0);
             e.bytes(&proof);
             wire::send(&mut s, Op::Hello, rank, 0, &e.0)?;
@@ -393,7 +413,7 @@ impl ProcessGroup {
         for s in peers.iter().flatten() {
             tune(s, opts.timeout)?;
         }
-        let mut g = ProcessGroup { env: env.clone(), opts, peers, seq: 0, checks: WeightChecks::default() };
+        let mut g = ProcessGroup { env: env.clone(), opts, platform, peers, seq: 0, checks: WeightChecks::default() };
         g.barrier()?;
         Ok(g)
     }
@@ -414,17 +434,28 @@ impl ProcessGroup {
         &self.opts
     }
 
+    /// The device this rank trains on (`GroupOptions::device`).
+    pub fn device(&self) -> Device {
+        self.opts.device
+    }
+
+    /// The platform key the ranks share (`GroupOptions::platform` and the device's part).
+    pub fn platform(&self) -> &str {
+        &self.platform
+    }
+
     /// Whether there is more than one process.
     pub fn is_distributed(&self) -> bool {
         self.world_size() > 1
     }
 
-    /// The reproducibility key: mode, sum order, backend and the platform key every rank shares.
+    /// The reproducibility key: mode, sum order, backend and the platform key every rank shares
+    /// (with the device's part on a GPU: `device=…`, see `device_key`).
     /// The world size is not part of it: for a fixed number of global micro-steps the flat rank
     /// order gives the same bits at every world size, so runs at different world sizes under one
     /// key may be pooled once shown identical on that platform (see `record`).
     pub fn key(&self) -> String {
-        format!("mode=deterministic order=flat-rank backend=tcp platform={}", self.opts.platform)
+        format!("mode=deterministic order=flat-rank backend=tcp platform={}", self.platform)
     }
 
     /// What a run records about its distribution: the key (with the platform key and its maths

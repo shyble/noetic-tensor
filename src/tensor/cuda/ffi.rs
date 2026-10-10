@@ -1,6 +1,6 @@
-//! Hand-written declarations for the three system libraries the CUDA backend links: the driver API (nvcuda / libcuda), the runtime compiler NVRTC and cuBLAS. Only the
-//! functions the backend calls are declared; the signatures follow cuda.h, nvrtc.h and cublas_api.h of
-//! CUDA 12 (the `_v2` names are the ABI the headers map the plain names to).
+//! Hand-written declarations for the four system libraries the CUDA backend links: the driver API (nvcuda / libcuda), the runtime compiler NVRTC, cuBLAS and the driver's
+//! management library NVML (for the driver's release only). Only the functions the backend calls are declared; the signatures follow cuda.h, nvrtc.h,
+//! cublas_api.h and nvml.h of CUDA 12 (the `_v2` names are the ABI the headers map the plain names to).
 
 #![allow(non_camel_case_types, dead_code)]
 
@@ -111,4 +111,14 @@ extern "C" {
         stride_c: i64,
         batch: c_int,
     ) -> cublasStatus_t;
+}
+
+// NVML, the driver's management library (nvml on Windows, nvidia-ml elsewhere): the driver's
+// release for the platform key.
+pub const NVML_SUCCESS: c_int = 0;
+
+extern "C" {
+    pub fn nvmlInit_v2() -> c_int;
+    pub fn nvmlSystemGetDriverVersion(version: *mut c_char, length: c_uint) -> c_int;
+    pub fn nvmlShutdown() -> c_int;
 }
