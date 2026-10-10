@@ -581,8 +581,14 @@ fn decay_order(name: &str) -> crate::nn::DecayOrder {
 /// by `zero_filled_mean` (tensor additions; None for a var no micro-step used, which AdamW then
 /// leaves alone, decay included); the final vars' hash and "idle.w"'s bits.
 fn idle_reference(micro: usize, steps: u64, order: &str) -> (String, Vec<u32>) {
+    idle_reference_on(micro, steps, order, crate::tensor::Device::Cpu(crate::tensor::CpuMode::Reference))
+}
+
+/// `idle_reference` on `device` (the engine's own tensor additions there).
+fn idle_reference_on(micro: usize, steps: u64, order: &str, device: crate::tensor::Device) -> (String, Vec<u32>) {
     let cfg = gate_cfg();
-    let (mut vars, mut adam) = gate_state_with(false, Some(decay_order(order)));
+    let (mut vars, mut adam) = gate_state_on(false, Some(decay_order(order)), device);
+    crate::tensor::set_default_device(device).unwrap();
     let shard = Shard::new(ShardSpec { seed: 11, items: 24, micro_batch: 2, micro_steps: micro }, 0, 1).unwrap();
     for step in 0..steps {
         let grads: Vec<Vec<Option<Tensor>>> = (0..micro)
@@ -595,6 +601,7 @@ fn idle_reference(micro: usize, steps: u64, order: &str) -> (String, Vec<u32>) {
         let summed = zero_filled_mean(&vars, &grads);
         crate::nn::Optimizer::step(&mut adam, &mut vars, summed, 1.0);
     }
+    crate::tensor::set_default_device(crate::tensor::Device::Cpu(crate::tensor::CpuMode::Reference)).unwrap();
     (state_hash(&vars).unwrap(), bits(&vars.var("idle.w").to_vec()))
 }
 
@@ -616,8 +623,14 @@ fn gate_micro(cfg: &DecoderConfig, lifted: &VarMap, items: &[usize], step: u64, 
 /// by `zero_filled_mean` (tensor additions, zeros for absent gradients), no `GradSum`; the final
 /// vars' hash.
 fn absent_reference(micro: usize, steps: u64) -> String {
+    absent_reference_on(micro, steps, crate::tensor::Device::Cpu(crate::tensor::CpuMode::Reference))
+}
+
+/// `absent_reference` on `device` (the engine's own tensor additions there).
+fn absent_reference_on(micro: usize, steps: u64, device: crate::tensor::Device) -> String {
     let cfg = gate_cfg();
-    let (mut vars, mut adam) = gate_state(true);
+    let (mut vars, mut adam) = gate_state_on(true, None, device);
+    crate::tensor::set_default_device(device).unwrap();
     let shard = Shard::new(ShardSpec { seed: 11, items: 24, micro_batch: 2, micro_steps: micro }, 0, 1).unwrap();
     for step in 0..steps {
         let grads: Vec<Vec<Option<Tensor>>> = (0..micro)
@@ -630,7 +643,42 @@ fn absent_reference(micro: usize, steps: u64) -> String {
         let summed = zero_filled_mean(&vars, &grads);
         crate::nn::Optimizer::step(&mut adam, &mut vars, summed, 1.0);
     }
+    crate::tensor::set_default_device(crate::tensor::Device::Cpu(crate::tensor::CpuMode::Reference)).unwrap();
     state_hash(&vars).unwrap()
+}
+
+/// The gate worker's optimizer: the gate's Adam(W), or SGD with momentum 0.9 and weight decay
+/// 1e-3 (`DIST_TEST_OPT=sgd`).
+enum GateOpt {
+    Adam(Adam),
+    Sgd(crate::nn::Sgd),
+}
+
+impl GateOpt {
+    fn opt(&mut self) -> &mut dyn crate::nn::Optimizer {
+        match self {
+            GateOpt::Adam(a) => a,
+            GateOpt::Sgd(s) => s,
+        }
+    }
+
+    fn ckpt(&self) -> &dyn CheckpointOptimizer {
+        match self {
+            GateOpt::Adam(a) => a,
+            GateOpt::Sgd(s) => s,
+        }
+    }
+
+    fn ckpt_mut(&mut self) -> &mut dyn CheckpointOptimizer {
+        match self {
+            GateOpt::Adam(a) => a,
+            GateOpt::Sgd(s) => s,
+        }
+    }
+}
+
+fn sgd_for(vars: &VarMap) -> crate::nn::Sgd {
+    crate::nn::Sgd::new(crate::nn::SgdConfig { lr: 0.05, momentum: 0.9, weight_decay: 1e-3, ..Default::default() }, ParamGroups::new(vars), vars)
 }
 
 #[test]
@@ -822,6 +870,7 @@ impl Gate {
 
     /// Every rank on the GPU of `kind` ("metal" or "cuda"), all of a node's ranks sharing its
     /// first GPU.
+    #[cfg_attr(not(any(all(feature = "metal", target_os = "macos"), feature = "cuda")), allow(dead_code))]
     fn on_gpu(self, kind: &str) -> Gate {
         let n = self.nproc;
         self.with("DIST_TEST_DEVICE", kind).with("DIST_TEST_RANKS_PER_DEVICE", n)
@@ -920,7 +969,15 @@ fn body_ddp_worker() {
     let mut g = ProcessGroup::from_env(GroupOptions { job_key: format!("gate micro={micro} absent={absent} idle={idle:?}"), secret: None, device, ..opts("") }).unwrap_or_else(|e| panic!("{e}"));
     let (rank, world) = (g.rank(), g.world_size());
     let cfg = gate_cfg();
-    let (mut vars, mut adam) = gate_state_on(absent, idle.as_deref().map(decay_order), device);
+    let (mut vars, adam) = gate_state_on(absent, idle.as_deref().map(decay_order), device);
+    let mut opt = match std::env::var("DIST_TEST_OPT").as_deref() {
+        Ok("sgd") => GateOpt::Sgd(sgd_for(&vars)),
+        _ => GateOpt::Adam(adam),
+    };
+    // With DIST_TEST_CLIP, every rank clips the summed gradients per seed to that norm before
+    // its optimizer steps (counting the steps where a seed was clipped).
+    let clip: Option<f64> = std::env::var("DIST_TEST_CLIP").ok().map(|v| v.parse().unwrap());
+    let mut clipped = 0usize;
     crate::tensor::set_default_device(device).unwrap();
     check_in_sync(&mut g, &vars).unwrap();
     // The shards: every rank checks every rank's shard hash for this run's steps.
@@ -935,7 +992,7 @@ fn body_ddp_worker() {
     if std::env::var("DIST_TEST_RESUME").is_ok() {
         let c = Checkpoint::load_latest(&mut g, &ckpt).unwrap_or_else(|e| panic!("{e}")).expect("a checkpoint to resume from");
         assert_eq!(c.cursor(rank), Some(c.meta.step), "this rank's cursor");
-        start = c.restore(&mut vars, &mut adam).unwrap();
+        start = c.restore(&mut vars, opt.ckpt_mut()).unwrap_or_else(|e| panic!("{e}"));
         check_in_sync(&mut g, &vars).unwrap();
         eprintln!("rank {rank}: resumed at step {start}");
     }
@@ -948,22 +1005,30 @@ fn body_ddp_worker() {
             }
         }
         let k = shard.micro_steps_per_rank();
-        data_parallel_step(&mut g, &mut vars, &mut adam, k, Reduce::Mean, 1.0, |lifted, i| {
-            // Dropout masks from the global micro-step, never the rank's.
-            let j = shard.global_micro(i) as u64;
-            gate_micro(&cfg, lifted, &shard.batch(step, i), step, j, micro, absent)
-        })
-        .unwrap();
+        // Dropout masks from the global micro-step, never the rank's.
+        let loss = |lifted: &VarMap, i: usize| gate_micro(&cfg, lifted, &shard.batch(step, i), step, shard.global_micro(i) as u64, micro, absent);
+        match clip {
+            None => {
+                data_parallel_step(&mut g, &mut vars, opt.opt(), k, Reduce::Mean, 1.0, loss).unwrap();
+            }
+            Some(max) => {
+                let (mut grads, _) = data_parallel_grads(&mut g, &vars, k, Reduce::Mean, loss).unwrap();
+                let norms = crate::nn::clip_grad_norm_per_seed(&mut grads, max);
+                clipped += norms.iter().any(|n| *n > max) as usize;
+                opt.opt().step(&mut vars, grads, 1.0);
+            }
+        }
         let h = check_in_sync(&mut g, &vars).unwrap();
         use std::io::Write;
         writeln!(log, "{} {h}", step + 1).unwrap();
         if every > 0 && (step + 1) % every == 0 {
-            Checkpoint::save(&mut g, &ckpt, step + 1, step + 1, &vars, &adam).unwrap();
+            Checkpoint::save(&mut g, &ckpt, step + 1, step + 1, &vars, opt.ckpt()).unwrap();
         }
     }
     if rank == 0 {
         vars.save(out.join("final.json")).unwrap();
         std::fs::write(out.join("key.txt"), format!("{}\n{}\n", g.record(), mine)).unwrap();
+        std::fs::write(out.join("clipped.txt"), format!("{clipped}\n")).unwrap();
     }
     g.barrier().unwrap();
 }
@@ -1162,13 +1227,9 @@ fn the_maths_fingerprint_reaches_the_ranges_the_engine_uses() {
 /// Run `gate` with `kill_rank` paused at step `at`, kill that rank, check the job stopped, then
 /// resume; returns the out folder.
 #[allow(clippy::too_many_arguments)]
-fn killed_and_resumed(name: &str, root: &Path, nproc: usize, micro: usize, steps: usize, every: usize, kill_rank: usize, at: u64, gpu: Option<&str>) -> PathBuf {
+fn killed_and_resumed(name: &str, root: &Path, nproc: usize, micro: usize, steps: usize, every: usize, kill_rank: usize, at: u64, on: &dyn Fn(Gate) -> Gate) -> PathBuf {
     let out = root.join(name);
     std::fs::create_dir_all(&out).unwrap();
-    let on = |g: Gate| match gpu {
-        Some(k) => g.on_gpu(k),
-        None => g,
-    };
     let gate = on(Gate::new(nproc, 1, micro, steps).with("DIST_TEST_CKPT", every).with("DIST_TEST_PAUSE", format!("{kill_rank}:{at}")));
     let cfg = gate.configs(&out).remove(0);
     let mut job = spawn(&cfg).unwrap();
@@ -1207,7 +1268,7 @@ fn gate_kill_and_resume_equals_the_uninterrupted_run() {
         std::fs::create_dir_all(&whole).unwrap();
         Gate::new(nproc, 1, micro, steps).run(&whole);
         let want = results(&whole, nproc);
-        let out = killed_and_resumed(&format!("w{nproc}-killed"), &root, nproc, micro, steps, every, kill_rank, at, None);
+        let out = killed_and_resumed(&format!("w{nproc}-killed"), &root, nproc, micro, steps, every, kill_rank, at, &|g| g);
         let got = results(&out, nproc);
         eprintln!("resume W {nproc}: final weights sha256 {} (uninterrupted {})", crate::hash::sha256_hex(got.0.as_bytes()), crate::hash::sha256_hex(want.0.as_bytes()));
         assert!(got.0 == want.0, "W {nproc}: the resumed run's final weights differ from the uninterrupted run's");
@@ -1397,7 +1458,10 @@ fn gpu_gate_two_ranks_on_one_gpu_equal_one_gpu_with_accumulation() {
     let steps = 12;
     let root = scratch("gpu-gate");
     let mut got: BTreeMap<String, (String, BTreeMap<u64, String>)> = BTreeMap::new();
-    for (name, nproc, micro) in [("m2-one-process", 1usize, 2usize), ("m2-two-processes", 2, 2), ("m4-one-process", 1, 4), ("m4-two-processes", 2, 4)] {
+    for (name, nproc, micro) in [("m2-one-process", 1usize, 2usize), ("m2-two-processes", 2, 2), ("m4-one-process", 1, 4), ("m4-two-processes", 2, 4), ("m4-four-processes", 4, 4)] {
+        if !may_run(nproc, &format!("{kind} gate {name}")) {
+            continue;
+        }
         let out = root.join(name);
         std::fs::create_dir_all(&out).unwrap();
         let t = Instant::now();
@@ -1426,10 +1490,10 @@ fn gpu_gate_two_ranks_on_one_gpu_equal_one_gpu_with_accumulation() {
     let r = results(&off, 1);
     eprintln!("{kind} gate m2-distribution-off: final weights sha256 {}", crate::hash::sha256_hex(r.0.as_bytes()));
     got.insert("m2-distribution-off".into(), r);
-    for (base, others) in [("m2-one-process", ["m2-two-processes", "m2-distribution-off"].as_slice()), ("m4-one-process", ["m4-two-processes"].as_slice())] {
+    for (base, others) in [("m2-one-process", ["m2-two-processes", "m2-distribution-off"].as_slice()), ("m4-one-process", ["m4-two-processes", "m4-four-processes"].as_slice())] {
         let b = &got[base];
         assert_eq!(b.1.len(), steps);
-        for n in others {
+        for n in others.iter().filter(|n| got.contains_key(**n)) {
             assert!(got[*n].0 == b.0, "{n}: the final weights differ from {base}");
             assert_eq!(got[*n].1, b.1, "{n}: the per-step hashes");
         }
@@ -1452,7 +1516,7 @@ fn gpu_gate_kill_and_resume_equals_the_uninterrupted_run() {
     std::fs::create_dir_all(&whole).unwrap();
     Gate::new(nproc, 1, micro, steps).on_gpu(kind).run(&whole);
     let want = results(&whole, nproc);
-    let out = killed_and_resumed("killed", &root, nproc, micro, steps, every, kill_rank, at, Some(kind));
+    let out = killed_and_resumed("killed", &root, nproc, micro, steps, every, kill_rank, at, &|g| g.on_gpu(kind));
     let got = results(&out, nproc);
     eprintln!("{kind} resume W {nproc}: final weights sha256 {} (uninterrupted {})", crate::hash::sha256_hex(got.0.as_bytes()), crate::hash::sha256_hex(want.0.as_bytes()));
     assert!(got.0 == want.0, "the resumed run's final weights differ from the uninterrupted run's");
@@ -1486,3 +1550,259 @@ fn gpu_a_job_mixing_gpu_and_cpu_ranks_is_refused() {
     assert!(!out.join("rank-0.steps").exists() && !out.join("rank-1.steps").exists(), "no step was taken");
     std::fs::remove_dir_all(&out).unwrap();
 }
+
+// ------------------------------------------------- optimizer state, clipping, GPU references
+
+#[test]
+fn an_sgd_checkpoint_resumes_exactly_and_another_optimizer_is_refused() {
+    // SGD with momentum: 4 steps straight through, against 2 steps, a checkpoint, a fresh
+    // process state restored from it, and 2 more steps: the same vars, bit for bit.
+    let _guard = procs();
+    let dir = scratch("sgd-checkpoint");
+    let cfg = gate_cfg();
+    let steps = |vars: &mut VarMap, opt: &mut dyn crate::nn::Optimizer, from: u64, to: u64| {
+        let mut g = ProcessGroup::single();
+        for step in from..to {
+            data_parallel_step(&mut g, vars, opt, 2, Reduce::Mean, 1.0, |l, i| gate_loss(&cfg, l, &[(2 * step as usize + i) % 24, (2 * step as usize + i + 5) % 24], step * 2 + i as u64)).unwrap();
+        }
+    };
+    let (mut straight, _) = gate_state(false);
+    let mut sgd = sgd_for(&straight);
+    steps(&mut straight, &mut sgd, 0, 4);
+    let (mut vars, _) = gate_state(false);
+    let mut sgd = sgd_for(&vars);
+    steps(&mut vars, &mut sgd, 0, 2);
+    assert!(sgd.buffers().iter().any(Option::is_some), "momentum buffers to save");
+    let mut g = ProcessGroup::single();
+    Checkpoint::save(&mut g, &dir, 2, 2, &vars, &sgd).unwrap();
+    let c = Checkpoint::load_latest(&mut g, &dir).unwrap().unwrap();
+    assert_eq!(c.meta.optimizer, "sgd");
+    let (mut fresh, _) = gate_state(false);
+    let mut fresh_sgd = sgd_for(&fresh);
+    assert_eq!(c.restore(&mut fresh, &mut fresh_sgd).unwrap(), 2);
+    steps(&mut fresh, &mut fresh_sgd, 2, 4);
+    assert_eq!(state_hash(&fresh).unwrap(), state_hash(&straight).unwrap(), "resumed under SGD with momentum");
+    // Without the momentum the resume would differ: the gate can see a lost buffer.
+    let c = Checkpoint::load_latest(&mut g, &dir).unwrap().unwrap();
+    let (mut lost, _) = gate_state(false);
+    c.restore(&mut lost, &mut sgd_for(&gate_state(false).0)).unwrap();
+    let mut no_momentum = sgd_for(&lost);
+    steps(&mut lost, &mut no_momentum, 2, 4);
+    assert_ne!(state_hash(&lost).unwrap(), state_hash(&straight).unwrap());
+    // Another optimizer: refused, both ways.
+    let c = Checkpoint::load_latest(&mut g, &dir).unwrap().unwrap();
+    let (mut v2, mut adam) = gate_state(false);
+    assert!(c.restore(&mut v2, &mut adam).unwrap_err().message().contains("resume refused"));
+    let dir2 = scratch("adam-checkpoint");
+    Checkpoint::save(&mut g, &dir2, 0, 0, &v2, &adam).unwrap();
+    let meta = std::fs::read_to_string(Checkpoint::folder(&dir2, 0).join("meta.json")).unwrap();
+    assert!(!meta.contains("optimizer"), "an Adam checkpoint is written as in 0.3.0");
+    let c = Checkpoint::load_latest(&mut g, &dir2).unwrap().unwrap();
+    assert!(c.restore(&mut v2, &mut sgd_for(&gate_state(false).0)).unwrap_err().message().contains("resume refused"));
+    std::fs::remove_dir_all(&dir).unwrap();
+    std::fs::remove_dir_all(&dir2).unwrap();
+}
+
+/// The resume gate under SGD with momentum (and weight decay): W ranks on `on`'s device, rank 1
+/// killed at step 7, resumed from the checkpoint of step 6: the uninterrupted run's weights and
+/// per-step hashes; an Adam run resuming the SGD checkpoint is refused.
+fn sgd_resume_gate(tag: &str, nproc: usize, on: &dyn Fn(Gate) -> Gate) {
+    let root = scratch(&format!("sgd-resume-{tag}"));
+    let (micro, every, kill_rank, at, steps) = (2usize, 3usize, 1usize, 7u64, 12usize);
+    let whole = root.join("uninterrupted");
+    std::fs::create_dir_all(&whole).unwrap();
+    on(Gate::new(nproc, 1, micro, steps).with("DIST_TEST_OPT", "sgd")).run(&whole);
+    let want = results(&whole, nproc);
+    let out = killed_and_resumed("killed", &root, nproc, micro, steps, every, kill_rank, at, &|g| on(g.with("DIST_TEST_OPT", "sgd")));
+    let got = results(&out, nproc);
+    eprintln!("{tag} SGD-momentum resume W {nproc}: final weights sha256 {} (uninterrupted {})", crate::hash::sha256_hex(got.0.as_bytes()), crate::hash::sha256_hex(want.0.as_bytes()));
+    assert!(got.0 == want.0, "{tag}: the resumed SGD run's final weights differ from the uninterrupted run's");
+    assert_eq!(got.1, want.1, "{tag}: the per-step hashes");
+    let cfg = on(Gate::new(nproc, 1, micro, steps).with("DIST_TEST_RESUME", 1)).configs(&out).remove(0);
+    assert!(run(&cfg).is_err());
+    assert!(logs(&out).contains("its state is not in the checkpoint: resume refused"), "{}", logs(&out));
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn gate_kill_and_resume_under_sgd_with_momentum() {
+    let _guard = procs();
+    sgd_resume_gate("cpu", 2, &|g| g);
+}
+
+/// The clipping gate: every rank clips the summed gradients per seed to norm 1.0 before its
+/// optimizer steps; W ranks × k micro-steps give the weights of one process × W·k, and the clip
+/// engaged (some step had a seed's norm above 1.0).
+fn clip_gate(tag: &str, on: &dyn Fn(Gate) -> Gate) {
+    let root = scratch(&format!("clip-{tag}"));
+    let steps = 12;
+    for (micro, worlds) in [(2usize, [1usize, 2].as_slice()), (4, [1, 2, 4].as_slice())] {
+        let mut base: Option<(String, BTreeMap<u64, String>)> = None;
+        for &w in worlds.iter().filter(|w| may_run(**w, &format!("{tag} clip gate M {micro} W {w}"))) {
+            let out = root.join(format!("m{micro}-w{w}"));
+            std::fs::create_dir_all(&out).unwrap();
+            on(Gate::new(w, 1, micro, steps).with("DIST_TEST_CLIP", "1.0")).run(&out);
+            let r = results(&out, w);
+            let clipped: usize = std::fs::read_to_string(out.join("clipped.txt")).unwrap().trim().parse().unwrap();
+            eprintln!("{tag} clip gate M {micro} W {w}: final weights sha256 {} (clipped on {clipped} of {steps} steps)", crate::hash::sha256_hex(r.0.as_bytes()));
+            assert!(clipped > 0, "{tag}: the clip never engaged");
+            match &base {
+                None => base = Some(r),
+                Some(b) => {
+                    assert!(r.0 == b.0, "{tag} M {micro} W {w}: the final weights differ from W 1");
+                    assert_eq!(r.1, b.1, "{tag} M {micro} W {w}: the per-step hashes");
+                }
+            }
+        }
+    }
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn gate_clipping_world_sizes_equal_one_process() {
+    let _guard = procs();
+    clip_gate("cpu", &|g| g);
+}
+
+/// The reference worker (run by the GPU gates in a fresh process; does nothing in a plain test
+/// run): `DIST_TEST_REF` = `absent:<micro>:<steps>` or `idle:<order>:<micro>:<steps>`, computed
+/// on `DIST_TEST_DEVICE` by one process with the engine's own tensor additions (no `GradSum`);
+/// writes the final vars' hash (and the idle weight's bits) to `ref.txt`.
+#[test]
+#[ignore = "run by its gate in a separate process"]
+fn body_reference_worker() {
+    let Ok(out) = std::env::var("DIST_TEST_OUT") else { return };
+    let device = worker_device(&DistEnv::single());
+    let spec = std::env::var("DIST_TEST_REF").unwrap();
+    let f: Vec<&str> = spec.split(':').collect();
+    let text = match f[0] {
+        "absent" => absent_reference_on(f[1].parse().unwrap(), f[2].parse().unwrap(), device),
+        "idle" => {
+            let (h, b) = idle_reference_on(f[2].parse().unwrap(), f[3].parse().unwrap(), f[1], device);
+            format!("{h}\n{}", b.iter().map(|x| format!("{x:08x}")).collect::<Vec<_>>().join(","))
+        }
+        k => panic!("DIST_TEST_REF {k}"),
+    };
+    std::fs::write(PathBuf::from(out).join("ref.txt"), text).unwrap();
+}
+
+/// The reference `spec` (see `body_reference_worker`) on the GPU of `kind`, in a fresh process.
+#[cfg(any(all(feature = "metal", target_os = "macos"), feature = "cuda"))]
+fn gpu_reference(kind: &str, root: &Path, spec: &str) -> String {
+    let out = root.join(format!("ref-{}", spec.replace(':', "-")));
+    std::fs::create_dir_all(&out).unwrap();
+    let st = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(worker_args("body_reference_worker"))
+        .env("DIST_TEST_OUT", &out)
+        .env("DIST_TEST_DEVICE", kind)
+        .env("DIST_TEST_REF", spec)
+        .env_remove("RANK")
+        .env_remove("WORLD_SIZE")
+        .output()
+        .unwrap();
+    assert!(st.status.success(), "{}", String::from_utf8_lossy(&st.stderr));
+    std::fs::read_to_string(out.join("ref.txt")).unwrap()
+}
+
+/// 0.3.0's absent-gradient and idle-weight gates through the GPU path: a var some micro-steps do
+/// not use (its gradient holding −0 and +0; at 2 micro-steps every third step none at all), and
+/// a weight no micro-step uses under AdamW's decoupled decay 0.1 in both orders. At every world
+/// size, the GPU ranks give the bits of one process on the GPU that puts zeros in place of the
+/// absent gradients and adds them with the engine's own tensor additions (no `GradSum`), and the
+/// idle weight keeps its initial bits, decay included.
+#[cfg(any(all(feature = "metal", target_os = "macos"), feature = "cuda"))]
+#[test]
+fn gpu_gate_absent_gradients_and_an_idle_weight_equal_one_gpu() {
+    let _guard = procs();
+    let kind = gpu_kind();
+    let root = scratch("gpu-absent-idle");
+    let steps = 9;
+    for (micro, worlds) in [(2usize, [1usize, 2].as_slice()), (4, [1, 2, 4].as_slice())] {
+        let want = gpu_reference(kind, &root, &format!("absent:{micro}:{steps}"));
+        for &w in worlds.iter().filter(|w| may_run(**w, &format!("{kind} absent gate M {micro} W {w}"))) {
+            let out = root.join(format!("absent-m{micro}-w{w}"));
+            std::fs::create_dir_all(&out).unwrap();
+            Gate::new(w, 1, micro, steps).on_gpu(kind).with("DIST_TEST_ABSENT", 1).run(&out);
+            let got = crate::hash::sha256_hex(results(&out, w).0.as_bytes());
+            eprintln!("{kind} absent gate M {micro} W {w}: final weights sha256 {got} (one GPU with zeros {want})");
+            assert_eq!(got, want, "{kind} absent M {micro}, W {w}");
+        }
+    }
+    let (steps, micro) = (6, 4);
+    let init = bits(&gate_state_with(false, Some(decay_order("after"))).0.var("idle.w").to_vec());
+    let init_text = init.iter().map(|x| format!("{x:08x}")).collect::<Vec<_>>().join(",");
+    for order in ["after", "torch"] {
+        let r = gpu_reference(kind, &root, &format!("idle:{order}:{micro}:{steps}"));
+        let (want, idle) = r.split_once('\n').unwrap();
+        assert_eq!(idle, init_text, "{kind} {order}: one GPU leaves the idle weight alone, decay included");
+        for w in [1usize, 2, 4].into_iter().filter(|w| may_run(*w, &format!("{kind} idle gate {order} W {w}"))) {
+            let out = root.join(format!("idle-{order}-w{w}"));
+            std::fs::create_dir_all(&out).unwrap();
+            Gate::new(w, 1, micro, steps).on_gpu(kind).with("DIST_TEST_IDLE", order).run(&out);
+            let (fin, _) = results(&out, w);
+            let got = crate::hash::sha256_hex(fin.as_bytes());
+            eprintln!("{kind} idle gate {order} W {w}: final weights sha256 {got} (one GPU {want})");
+            assert_eq!(got, want, "{kind} idle {order}, W {w}");
+            assert_eq!(bits(&VarMap::from_json(&fin).unwrap().var("idle.w").to_vec()), init, "{kind} {order}, W {w}: the idle weight");
+        }
+    }
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[cfg(any(all(feature = "metal", target_os = "macos"), feature = "cuda"))]
+#[test]
+fn gpu_gate_clipping_world_sizes_equal_one_gpu() {
+    let _guard = procs();
+    let kind = gpu_kind();
+    clip_gate(kind, &|g| g.on_gpu(kind));
+}
+
+#[cfg(any(all(feature = "metal", target_os = "macos"), feature = "cuda"))]
+#[test]
+fn gpu_gate_kill_and_resume_under_sgd_with_momentum() {
+    let _guard = procs();
+    let kind = gpu_kind();
+    sgd_resume_gate(kind, 2, &|g| g.on_gpu(kind));
+}
+
+/// Without NVML (here a library name that does not exist, as in a container without it) a CUDA
+/// process still trains on its GPU, but its distributed key is an error: never a key without
+/// the driver's release.
+#[cfg(feature = "cuda")]
+#[test]
+#[ignore = "run by its wrapper in a fresh process"]
+fn body_missing_nvml() {
+    *crate::tensor::nvml::OVERRIDE.lock().unwrap() = Some("nvml-that-does-not-exist".into());
+    let d = crate::tensor::Device::Cuda(0);
+    let x = Tensor::from_data(vec![1.0, 2.0, 3.0], [3]).to(d);
+    assert_eq!((x.clone() + x).to_vec(), vec![2.0, 4.0, 6.0], "the device works");
+    assert!(crate::tensor::gpu_key(d).is_ok(), "the device's own key works");
+    let e = device_key(d).unwrap_err();
+    assert!(e.message().contains("NVML") && e.message().contains("could not be loaded"), "{e}");
+    let e = ProcessGroup::from_env(GroupOptions::new("no nvml").with_device(d)).unwrap_err();
+    assert!(e.message().contains("NVML"), "{e}");
+    eprintln!("cuda without NVML: the device trains; the key is refused: {e}");
+}
+
+#[cfg(feature = "cuda")]
+#[test]
+fn cuda_a_missing_nvml_refuses_the_key_but_not_the_device() {
+    let st = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(worker_args("body_missing_nvml"))
+        .env_remove("RANK")
+        .env_remove("WORLD_SIZE")
+        .output()
+        .unwrap();
+    let text = format!("{}{}", String::from_utf8_lossy(&st.stdout), String::from_utf8_lossy(&st.stderr));
+    assert!(st.status.success() && text.contains("1 passed"), "{text}");
+}
+
+#[test]
+fn group_options_are_built_with_a_builder() {
+    let o = GroupOptions::new("k").with_device(crate::tensor::Device::Metal(0)).with_chunk_elems(5).with_timeout(Duration::from_secs(3)).with_secret(Some(test_secret()));
+    assert_eq!((o.job_key.as_str(), o.device, o.chunk_elems, o.timeout), ("k", crate::tensor::Device::Metal(0), 5, Duration::from_secs(3)));
+    assert!(o.secret.is_some());
+    assert_eq!(GroupOptions::new("k").with_job_key("j").job_key, "j");
+    assert_eq!(GroupOptions::new("x").platform, platform_key());
+}
+

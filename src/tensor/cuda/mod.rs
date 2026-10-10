@@ -166,9 +166,16 @@ fn blas(r: cublasStatus_t, what: &str) -> Result<()> {
 
 /// Compile `src` to PTX for compute capability `cc` (no fast math, no FMA contraction).
 fn compile(src: &str, cc: (i32, i32)) -> Result<CString> {
+    let (ptx, _) = nvrtc_build(src, &format!("--gpu-architecture=compute_{}{}", cc.0, cc.1), false)?;
+    CString::new(ptx).map_err(|e| dev_err("PTX", e))
+}
+
+/// NVRTC's build of `src` with the backend's options (`--fmad=false --std=c++14`) and `arch`:
+/// the PTX, and with `cubin` the CUBIN (for a real architecture, `sm_XY`).
+fn nvrtc_build(src: &str, arch: &str, cubin: bool) -> Result<(Vec<u8>, Vec<u8>)> {
     let csrc = CString::new(src).unwrap();
     let name = CString::new("tensor_kernels.cu").unwrap();
-    let opts: Vec<CString> = [format!("--gpu-architecture=compute_{}{}", cc.0, cc.1), "--fmad=false".into(), "--std=c++14".into()].into_iter().map(|o| CString::new(o).unwrap()).collect();
+    let opts: Vec<CString> = [arch.to_string(), "--fmad=false".into(), "--std=c++14".into()].into_iter().map(|o| CString::new(o).unwrap()).collect();
     let optp: Vec<*const std::ffi::c_char> = opts.iter().map(|o| o.as_ptr()).collect();
     let mut prog: nvrtcProgram = std::ptr::null_mut();
     // SAFETY: valid NUL-terminated strings and a program handle destroyed below.
@@ -185,13 +192,38 @@ fn compile(src: &str, cc: (i32, i32)) -> Result<CString> {
             return Err(dev_err("nvrtcCompileProgram", log));
         }
         let mut n = 0usize;
-        nvrtc(nvrtcGetPTXSize(prog, &mut n), "nvrtcGetPTXSize")?;
-        let mut ptx = vec![0u8; n];
-        nvrtc(nvrtcGetPTX(prog, ptx.as_mut_ptr() as *mut _), "nvrtcGetPTX")?;
+        let mut out = || -> Result<(Vec<u8>, Vec<u8>)> {
+            nvrtc(nvrtcGetPTXSize(prog, &mut n), "nvrtcGetPTXSize")?;
+            let mut ptx = vec![0u8; n];
+            nvrtc(nvrtcGetPTX(prog, ptx.as_mut_ptr() as *mut _), "nvrtcGetPTX")?;
+            ptx.truncate(n.saturating_sub(1));
+            let mut bin = vec![];
+            if cubin {
+                let mut m = 0usize;
+                nvrtc(nvrtcGetCUBINSize(prog, &mut m), "nvrtcGetCUBINSize")?;
+                bin = vec![0u8; m];
+                nvrtc(nvrtcGetCUBIN(prog, bin.as_mut_ptr() as *mut _), "nvrtcGetCUBIN")?;
+            }
+            Ok((ptx, bin))
+        };
+        let r = out();
         nvrtcDestroyProgram(&mut prog);
-        ptx.truncate(n.saturating_sub(1));
-        Ok(CString::new(ptx).map_err(|e| dev_err("PTX", e))?)
+        r
     }
+}
+
+/// For records of a GPU run: what NVRTC makes of the kernel source for compute capability `cc`.
+/// - The PTX the backend loads, byte for byte (`compute_XY` and the backend's options); the
+///   driver compiles it to machine code when the module loads.
+/// - The CUBIN NVRTC itself makes for the real architecture (`sm_XY`, the same options), for
+///   disassembly (cuobjdump, nvdisasm). It shows NVRTC's machine code, which need not be the
+///   driver's compilation of the PTX that the backend runs.
+///
+/// Diagnostics only: nothing in the backend uses the CUBIN.
+pub fn kernel_ptx_and_cubin(cc: (i32, i32)) -> Result<(String, Vec<u8>)> {
+    let (ptx, _) = nvrtc_build(kernels::SOURCE, &format!("--gpu-architecture=compute_{}{}", cc.0, cc.1), false)?;
+    let (_, cubin) = nvrtc_build(kernels::SOURCE, &format!("--gpu-architecture=sm_{}{}", cc.0, cc.1), true)?;
+    Ok((String::from_utf8(ptx).map_err(|e| dev_err("PTX", e))?, cubin))
 }
 
 impl CudaDevice {
@@ -505,26 +537,17 @@ impl Drop for Inner {
     }
 }
 
-/// The NVIDIA driver's release (e.g. "576.88"), from NVML (part of the driver), read once.
-pub(crate) fn driver_release() -> Result<String> {
-    static R: std::sync::OnceLock<std::result::Result<String, String>> = std::sync::OnceLock::new();
-    R.get_or_init(|| {
-        let mut buf = [0 as std::ffi::c_char; 96];
-        // SAFETY: NVML's init and shutdown are reference counted; the buffer outlives the call
-        // and its length is passed.
-        unsafe {
-            let r = nvmlInit_v2();
-            if r != NVML_SUCCESS {
-                return Err(format!("nvmlInit: status {r}"));
-            }
-            let r = nvmlSystemGetDriverVersion(buf.as_mut_ptr(), buf.len() as std::ffi::c_uint);
-            nvmlShutdown();
-            if r != NVML_SUCCESS {
-                return Err(format!("nvmlSystemGetDriverVersion: status {r}"));
-            }
-            Ok(CStr::from_ptr(buf.as_ptr()).to_string_lossy().into_owned())
-        }
-    })
-    .clone()
-    .map_err(|e| dev_err("NVML", e))
+#[cfg(test)]
+mod build_tests {
+    /// NVRTC's PTX for this GPU is the backend's own (byte for byte), and its CUBIN is an ELF.
+    #[test]
+    fn nvrtc_gives_the_backends_ptx_and_a_cubin() {
+        let dev = super::CudaDevice::new(0).expect("a CUDA device");
+        let cc = dev.info().compute_capability;
+        let (ptx, cubin) = super::kernel_ptx_and_cubin(cc).unwrap();
+        assert!(!ptx.is_empty() && ptx.contains(".version") && ptx.contains(&format!(".target sm_{}{}", cc.0, cc.1)), "{}", &ptx[..ptx.len().min(300)]);
+        assert_eq!(ptx.as_bytes(), super::compile(super::kernels::SOURCE, cc).unwrap().as_bytes(), "the PTX the backend loads");
+        assert!(cubin.len() > 1024 && cubin.starts_with(b"\x7fELF"), "a CUBIN of {} bytes", cubin.len());
+        eprintln!("cuda nvrtc build sm{}{}: PTX {} bytes (sha256 {}), CUBIN {} bytes (sha256 {})", cc.0, cc.1, ptx.len(), crate::hash::sha256_hex(ptx.as_bytes()), cubin.len(), crate::hash::sha256_hex(&cubin));
+    }
 }

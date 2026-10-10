@@ -42,7 +42,7 @@ fn batch(items: &[usize]) -> (IntTensor, IntTensor, Tensor) {
 
 fn main() -> noetic::Result<()> {
     pin_reference();
-    let mut group = ProcessGroup::from_env(GroupOptions { job_key: "copy task".into(), ..GroupOptions::default() })?;
+    let mut group = ProcessGroup::from_env(GroupOptions::new("copy task"))?;
     let (rank, world) = (group.rank(), group.world_size());
     let cfg = DecoderConfig::new(16, 32, 4, 7, 2, 96);
     let (_, mut vars) = Decoder::init(cfg.clone(), SEEDS, 1)?;

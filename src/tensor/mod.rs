@@ -18,6 +18,7 @@ mod cuda_kernels;
 #[doc(hidden)]
 pub mod metal;
 pub mod device;
+pub(crate) mod nvml;
 mod boolean;
 mod dtype;
 mod error;
