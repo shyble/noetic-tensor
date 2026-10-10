@@ -18,6 +18,7 @@ mod cuda_kernels;
 #[doc(hidden)]
 pub mod metal;
 pub mod device;
+pub(crate) mod nvml;
 mod boolean;
 mod dtype;
 mod error;
@@ -42,7 +43,7 @@ pub use layout::Layout;
 pub use storage::{CpuStorage, Storage};
 #[cfg(all(feature = "metal", target_os = "macos"))]
 pub use metal::{replay_trace as metal_replay_trace, set_trace as metal_trace, set_per_kernel_timing as metal_per_kernel_timing, take_profile as metal_profile, Profile as MetalProfile};
-pub use gpu::{gpu_key, synchronize, transfer_counts, GpuStorage};
+pub use gpu::{gpu_key, gpu_platform_key, synchronize, transfer_counts, GpuStorage};
 pub use float::Tensor;
 
 /// GPU memory on `device`: (bytes in use, the limit) — Metal: this process's buffers and the
