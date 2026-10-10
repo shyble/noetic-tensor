@@ -27,8 +27,11 @@ use crate::tensor::{CpuMode, Device};
 use std::net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
 use std::time::{Duration, Instant};
 
-/// Options of a process group.
+/// Options of a process group. Made with `GroupOptions::new` (or `default`) and the `with_*`
+/// methods; non-exhaustive, so later fields do not break callers. The fields stay public to read
+/// and to set.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct GroupOptions {
     /// A string every rank must agree on (e.g. a hash of the run's configuration); a rank with
     /// another key is refused at the rendezvous.
@@ -51,6 +54,49 @@ pub struct GroupOptions {
     /// `from_env`, and without one the job is unauthenticated (isolated development networks
     /// only).
     pub secret: Option<JobSecret>,
+}
+
+impl GroupOptions {
+    /// The default options with this job key.
+    pub fn new(job_key: impl Into<String>) -> GroupOptions {
+        GroupOptions { job_key: job_key.into(), ..GroupOptions::default() }
+    }
+
+    pub fn with_job_key(mut self, job_key: impl Into<String>) -> GroupOptions {
+        self.job_key = job_key.into();
+        self
+    }
+
+    /// The rank's device (`DistEnv::device`).
+    pub fn with_device(mut self, device: Device) -> GroupOptions {
+        self.device = device;
+        self
+    }
+
+    pub fn with_timeout(mut self, timeout: Duration) -> GroupOptions {
+        self.timeout = timeout;
+        self
+    }
+
+    pub fn with_connect_timeout(mut self, connect_timeout: Duration) -> GroupOptions {
+        self.connect_timeout = connect_timeout;
+        self
+    }
+
+    pub fn with_chunk_elems(mut self, chunk_elems: usize) -> GroupOptions {
+        self.chunk_elems = chunk_elems;
+        self
+    }
+
+    pub fn with_platform(mut self, platform: impl Into<String>) -> GroupOptions {
+        self.platform = platform.into();
+        self
+    }
+
+    pub fn with_secret(mut self, secret: Option<JobSecret>) -> GroupOptions {
+        self.secret = secret;
+        self
+    }
 }
 
 impl Default for GroupOptions {

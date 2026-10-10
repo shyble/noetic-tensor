@@ -880,7 +880,8 @@ impl GpuBackend for CudaBackend {
         // The driver's JIT compiles the kernels' PTX: its release (e.g. 576.88) is part of the
         // key, beside the CUDA version it supports (`driver…` in `key`) and NVRTC's.
         drop(context()?);
-        Ok(format!("driver-release-{}", super::driver_release()?))
+        let r = crate::tensor::nvml::driver_release().map_err(|e| TensorError::Device(format!("CUDA driver release: {e}")))?;
+        Ok(format!("driver-release-{r}"))
     }
 }
 
