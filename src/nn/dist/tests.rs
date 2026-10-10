@@ -522,6 +522,12 @@ fn gate_state(absent: bool) -> (VarMap, Adam) {
 /// `gate_state`, and with `idle` an extra var "idle.w" `[S, 3]` that no micro-step ever uses,
 /// trained by AdamW with decoupled decay 0.1 in the given order.
 fn gate_state_with(absent: bool, idle: Option<crate::nn::DecayOrder>) -> (VarMap, Adam) {
+    gate_state_on(absent, idle, crate::tensor::Device::Cpu(crate::tensor::CpuMode::Reference))
+}
+
+/// `gate_state_with` on `device`: the vars are made on the CPU reference backend (the same
+/// initial bits on every device), then moved to `device`, where the optimizer's state is made.
+fn gate_state_on(absent: bool, idle: Option<crate::nn::DecayOrder>, device: crate::tensor::Device) -> (VarMap, Adam) {
     let (_, mut vars) = Decoder::init(gate_cfg(), GATE_SEEDS, 5).unwrap();
     if absent {
         vars.insert("branch.w", Tensor::from_data((0..GATE_SEEDS * 4).map(|i| 0.1 * i as f32 - 0.3).collect(), [GATE_SEEDS, 4])).unwrap();
@@ -533,8 +539,34 @@ fn gate_state_with(absent: bool, idle: Option<crate::nn::DecayOrder>) -> (VarMap
         }
         None => AdamConfig { lr: 1e-2, ..AdamConfig::default() },
     };
+    let vars = vars_on(&vars, device);
     let adam = Adam::new(cfg, ParamGroups::new(&vars), &vars);
     (vars, adam)
+}
+
+/// `vars` moved to `device`, in order.
+fn vars_on(vars: &VarMap, device: crate::tensor::Device) -> VarMap {
+    let mut m = VarMap::new();
+    for (name, t) in vars.iter() {
+        m.insert(name, t.clone().to(device)).unwrap();
+    }
+    m
+}
+
+/// The device a gate worker trains on: `DIST_TEST_DEVICE` (cpu, metal or cuda; the CPU reference
+/// backend by default), except for the ranks listed in `DIST_TEST_CPU_RANKS` (comma-separated),
+/// which use the CPU (to make a mixed job); `DIST_TEST_RANKS_PER_DEVICE` ranks share a GPU.
+fn worker_device(env: &DistEnv) -> crate::tensor::Device {
+    let cpu_ranks: Vec<usize> = std::env::var("DIST_TEST_CPU_RANKS").map(|v| v.split(',').map(|r| r.parse().unwrap()).collect()).unwrap_or_default();
+    let kind = match std::env::var("DIST_TEST_DEVICE").as_deref() {
+        _ if cpu_ranks.contains(&env.rank) => DeviceKind::Cpu,
+        Ok("metal") => DeviceKind::Metal,
+        Ok("cuda") => DeviceKind::Cuda,
+        Ok("cpu") | Err(_) => DeviceKind::Cpu,
+        Ok(other) => panic!("DIST_TEST_DEVICE={other}"),
+    };
+    let per = std::env::var("DIST_TEST_RANKS_PER_DEVICE").map_or(1, |v| v.parse().unwrap());
+    env.device(kind, per).unwrap()
 }
 
 fn decay_order(name: &str) -> crate::nn::DecayOrder {
@@ -748,6 +780,17 @@ fn procs() -> std::sync::MutexGuard<'static, ()> {
     PROCS.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// Whether a test may run `n` busy processes at once: `DIST_TEST_MAX_PROCS` (unset: any number)
+/// lets a shared machine skip the larger world sizes. A skipped run is reported, and the other
+/// runs of its test still compare with each other.
+fn may_run(n: usize, what: &str) -> bool {
+    let max = std::env::var("DIST_TEST_MAX_PROCS").ok().and_then(|v| v.parse::<usize>().ok()).unwrap_or(usize::MAX);
+    if n > max {
+        eprintln!("SKIPPED {what}: {n} processes at once, DIST_TEST_MAX_PROCS={max}");
+    }
+    n <= max
+}
+
 /// A fresh folder under the crate's target folder.
 fn scratch(name: &str) -> PathBuf {
     let d = Path::new(env!("CARGO_MANIFEST_DIR")).join("target").join("dist-tests").join(format!("{name}-{}", std::process::id()));
@@ -775,6 +818,13 @@ impl Gate {
     fn with(mut self, k: &str, v: impl ToString) -> Gate {
         self.env.push((k.into(), v.to_string()));
         self
+    }
+
+    /// Every rank on the GPU of `kind` ("metal" or "cuda"), all of a node's ranks sharing its
+    /// first GPU.
+    fn on_gpu(self, kind: &str) -> Gate {
+        let n = self.nproc;
+        self.with("DIST_TEST_DEVICE", kind).with("DIST_TEST_RANKS_PER_DEVICE", n)
     }
 
     fn configs(&self, out: &Path) -> Vec<LaunchConfig> {
@@ -860,12 +910,18 @@ fn body_ddp_worker() {
     });
     let absent = std::env::var("DIST_TEST_ABSENT").is_ok();
     let idle = std::env::var("DIST_TEST_IDLE").ok();
-    crate::tensor::pin_reference();
+    // This rank's device, from its rank on the node (LOCAL_RANK); a CPU process pins the
+    // reference backend.
+    let device = worker_device(&DistEnv::from_env().unwrap().unwrap_or_else(DistEnv::single));
+    if device == crate::tensor::Device::Cpu(crate::tensor::CpuMode::Reference) {
+        crate::tensor::pin_reference();
+    }
     // The secret comes from the launcher (DIST_JOB_SECRET).
-    let mut g = ProcessGroup::from_env(GroupOptions { job_key: format!("gate micro={micro} absent={absent} idle={idle:?}"), secret: None, ..opts("") }).unwrap();
+    let mut g = ProcessGroup::from_env(GroupOptions { job_key: format!("gate micro={micro} absent={absent} idle={idle:?}"), secret: None, device, ..opts("") }).unwrap_or_else(|e| panic!("{e}"));
     let (rank, world) = (g.rank(), g.world_size());
     let cfg = gate_cfg();
-    let (mut vars, mut adam) = gate_state_with(absent, idle.as_deref().map(decay_order));
+    let (mut vars, mut adam) = gate_state_on(absent, idle.as_deref().map(decay_order), device);
+    crate::tensor::set_default_device(device).unwrap();
     check_in_sync(&mut g, &vars).unwrap();
     // The shards: every rank checks every rank's shard hash for this run's steps.
     let sp = ShardSpec { seed: 11, items: 24, micro_batch: 2, micro_steps: micro };
@@ -954,6 +1010,9 @@ fn gate_world_sizes_1_2_4_equal_one_process_with_accumulation() {
     ];
     let mut got: BTreeMap<&str, (String, BTreeMap<u64, String>)> = BTreeMap::new();
     for (name, nproc, nnodes, micro) in runs {
+        if !may_run(nproc * nnodes, name) {
+            continue;
+        }
         let out = root.join(name);
         std::fs::create_dir_all(&out).unwrap();
         let t = Instant::now();
@@ -984,7 +1043,7 @@ fn gate_world_sizes_1_2_4_equal_one_process_with_accumulation() {
     for (group, names) in [("m2", ["m2-one-node-two-processes", "m2-two-nodes-one-process-each", "m2-distribution-off"].as_slice()), ("m4", ["m4-two-processes", "m4-four-processes"].as_slice())] {
         let base = &got[format!("{group}-one-process").as_str()];
         assert_eq!(base.1.len(), steps);
-        for n in names {
+        for n in names.iter().filter(|n| got.contains_key(**n)) {
             assert!(got[n].0 == base.0, "{n}: the final weights differ from one process with accumulation");
             assert_eq!(got[n].1, base.1, "{n}: the per-step hashes");
         }
@@ -1003,7 +1062,7 @@ fn gate_absent_gradients_equal_one_process_with_zeros() {
     let root = scratch("absent");
     for (micro, worlds) in [(2usize, [1usize, 2].as_slice()), (4, [1, 2, 4].as_slice())] {
         let want = absent_reference(micro, steps as u64);
-        for &w in worlds {
+        for &w in worlds.iter().filter(|w| may_run(**w, &format!("absent gate M {micro} W {w}"))) {
             let out = root.join(format!("m{micro}-w{w}"));
             std::fs::create_dir_all(&out).unwrap();
             Gate::new(w, 1, micro, steps).with("DIST_TEST_ABSENT", 1).run(&out);
@@ -1028,7 +1087,7 @@ fn gate_an_idle_weight_is_left_alone_like_one_process() {
     for order in ["after", "torch"] {
         let (want, idle) = idle_reference(micro, steps as u64, order);
         assert_eq!(idle, init, "{order}: one process leaves the idle weight alone, decay included");
-        for w in [1usize, 2, 4] {
+        for w in [1usize, 2, 4].into_iter().filter(|w| may_run(*w, &format!("idle gate {order} W {w}"))) {
             let out = root.join(format!("{order}-w{w}"));
             std::fs::create_dir_all(&out).unwrap();
             Gate::new(w, 1, micro, steps).with("DIST_TEST_IDLE", order).run(&out);
@@ -1103,10 +1162,14 @@ fn the_maths_fingerprint_reaches_the_ranges_the_engine_uses() {
 /// Run `gate` with `kill_rank` paused at step `at`, kill that rank, check the job stopped, then
 /// resume; returns the out folder.
 #[allow(clippy::too_many_arguments)]
-fn killed_and_resumed(name: &str, root: &Path, nproc: usize, micro: usize, steps: usize, every: usize, kill_rank: usize, at: u64) -> PathBuf {
+fn killed_and_resumed(name: &str, root: &Path, nproc: usize, micro: usize, steps: usize, every: usize, kill_rank: usize, at: u64, gpu: Option<&str>) -> PathBuf {
     let out = root.join(name);
     std::fs::create_dir_all(&out).unwrap();
-    let gate = Gate::new(nproc, 1, micro, steps).with("DIST_TEST_CKPT", every).with("DIST_TEST_PAUSE", format!("{kill_rank}:{at}"));
+    let on = |g: Gate| match gpu {
+        Some(k) => g.on_gpu(k),
+        None => g,
+    };
+    let gate = on(Gate::new(nproc, 1, micro, steps).with("DIST_TEST_CKPT", every).with("DIST_TEST_PAUSE", format!("{kill_rank}:{at}")));
     let cfg = gate.configs(&out).remove(0);
     let mut job = spawn(&cfg).unwrap();
     let marker = out.join(format!("paused-{kill_rank}"));
@@ -1123,7 +1186,7 @@ fn killed_and_resumed(name: &str, root: &Path, nproc: usize, micro: usize, steps
     let want = Checkpoint::folder(Path::new(""), at / every as u64 * every as u64).display().to_string();
     assert_eq!(latest.trim(), want, "the last coordinated checkpoint");
     // The resume: the same job, from the checkpoint.
-    let resume = Gate::new(nproc, 1, micro, steps).with("DIST_TEST_CKPT", every).with("DIST_TEST_RESUME", 1);
+    let resume = on(Gate::new(nproc, 1, micro, steps).with("DIST_TEST_CKPT", every).with("DIST_TEST_RESUME", 1));
     std::fs::remove_dir_all(out.join("logs")).unwrap();
     resume.run(&out);
     out
@@ -1136,12 +1199,15 @@ fn gate_kill_and_resume_equals_the_uninterrupted_run() {
     let _guard = procs();
     let root = scratch("resume");
     for (nproc, micro, every, kill_rank, at) in [(2usize, 2usize, 3usize, 1usize, 7u64), (4, 4, 2, 2, 5)] {
+        if !may_run(nproc, &format!("resume gate W {nproc}")) {
+            continue;
+        }
         let steps = 12;
         let whole = root.join(format!("w{nproc}-uninterrupted"));
         std::fs::create_dir_all(&whole).unwrap();
         Gate::new(nproc, 1, micro, steps).run(&whole);
         let want = results(&whole, nproc);
-        let out = killed_and_resumed(&format!("w{nproc}-killed"), &root, nproc, micro, steps, every, kill_rank, at);
+        let out = killed_and_resumed(&format!("w{nproc}-killed"), &root, nproc, micro, steps, every, kill_rank, at, None);
         let got = results(&out, nproc);
         eprintln!("resume W {nproc}: final weights sha256 {} (uninterrupted {})", crate::hash::sha256_hex(got.0.as_bytes()), crate::hash::sha256_hex(want.0.as_bytes()));
         assert!(got.0 == want.0, "W {nproc}: the resumed run's final weights differ from the uninterrupted run's");
@@ -1154,4 +1220,269 @@ fn gate_kill_and_resume_equals_the_uninterrupted_run() {
         assert!(logs(&out).contains("resume refused"), "{}", logs(&out));
     }
     std::fs::remove_dir_all(&root).unwrap();
+}
+
+// ------------------------------------------------------------------------------ devices
+
+#[test]
+fn a_ranks_device_follows_its_rank_on_the_node() {
+    use crate::tensor::{CpuMode, Device};
+    let env = |local: usize| DistEnv { rank: 4 + local, world_size: 8, rank_in_node: local, node_size: 4, node_rank: 1, master_addr: "h".into(), master_port: 1 };
+    // One GPU per rank: torchrun's cuda:LOCAL_RANK.
+    assert_eq!((0..4).map(|l| env(l).device(DeviceKind::Cuda, 1).unwrap()).collect::<Vec<_>>(), (0..4).map(Device::Cuda).collect::<Vec<_>>());
+    assert_eq!(env(3).device(DeviceKind::Metal, 1).unwrap(), Device::Metal(3));
+    // Ranks sharing GPUs: 2 per device, or all 4 on the first.
+    assert_eq!((0..4).map(|l| env(l).device(DeviceKind::Cuda, 2).unwrap()).collect::<Vec<_>>(), [0, 0, 1, 1].map(Device::Cuda).to_vec());
+    assert!((0..4).all(|l| env(l).device(DeviceKind::Cuda, 4).unwrap() == Device::Cuda(0)));
+    assert_eq!(env(2).device(DeviceKind::Cpu, 1).unwrap(), Device::Cpu(CpuMode::Reference));
+    assert!(env(0).device(DeviceKind::Cuda, 0).is_err());
+    // The CPU reference backend's key is 0.3.0's (no device part); the fast backend is refused.
+    assert_eq!(device_key(Device::Cpu(CpuMode::Reference)).unwrap(), None);
+    assert!(device_key(Device::Cpu(CpuMode::Fast)).unwrap_err().message().contains("fast CPU backend"));
+    let g = ProcessGroup::single();
+    assert_eq!(g.key(), format!("mode=deterministic order=flat-rank backend=tcp platform={}", platform_key()));
+    assert_eq!(g.device(), Device::Cpu(CpuMode::Reference));
+}
+
+#[test]
+fn a_step_refuses_vars_off_the_groups_device() {
+    // The group trains on Cpu(Reference); vars on the fast backend are another device.
+    let (mut vars, mut adam) = gate_state(false);
+    let fast = vars_on(&vars, crate::tensor::Device::Cpu(crate::tensor::CpuMode::Fast));
+    let mut g = ProcessGroup::single();
+    let cfg = gate_cfg();
+    let mut wrong = fast.clone();
+    let e = data_parallel_step(&mut g, &mut wrong, &mut adam, 1, Reduce::Mean, 1.0, |l, _| gate_loss(&cfg, l, &[0, 1], 0)).unwrap_err();
+    assert!(e.message().contains("GroupOptions::device"), "{e}");
+    data_parallel_step(&mut g, &mut vars, &mut adam, 1, Reduce::Mean, 1.0, |l, _| gate_loss(&cfg, l, &[0, 1], 0)).unwrap();
+}
+
+#[test]
+fn the_kernel_sources_hold_no_atomic_operations() {
+    // The GPU kernels' sums run in a fixed order: no atomic read-modify-write anywhere (the CUDA
+    // source is checked in every build; the Metal source with the metal feature).
+    let banned = ["atomicAdd", "atomicSub", "atomicCAS", "atomicExch", "atomicMax", "atomicMin", "atomicInc", "atomicDec", "atomicAnd", "atomicOr", "atomicXor", "atomic_"];
+    let check = |what: &str, src: &str| {
+        for b in banned {
+            assert!(!src.contains(b), "{what}: {b}");
+        }
+    };
+    check("CUDA kernels", crate::tensor::cuda_kernel_source());
+    #[cfg(all(feature = "metal", target_os = "macos"))]
+    check("Metal kernels", crate::tensor::metal::shaders::SOURCE);
+}
+
+/// The GPU this build tests on ("metal" on macOS with the metal feature, else "cuda").
+#[cfg(any(all(feature = "metal", target_os = "macos"), feature = "cuda"))]
+fn gpu_kind() -> &'static str {
+    if cfg!(all(feature = "metal", target_os = "macos")) {
+        "metal"
+    } else {
+        "cuda"
+    }
+}
+
+/// The repeatability worker (run by `gpu_training_is_byte_identical_run_to_run` in separate
+/// processes; does nothing in a plain test run): on `DIST_TEST_DEVICE`, trains
+/// - the gate's decoder (dropout 0.1) with `data_parallel_step` on the single-process group,
+///   2 micro-steps, 12 steps;
+/// - a mixture-of-experts decoder (gather embedding, top-2 routing with capacity: gather,
+///   scatter and index adds, a sort) with `train_step`, 12 steps;
+/// - a wider decoder (d 128, MLP 512, context 64, batch 8) whose products take the 128-tile
+///   and, on CUDA, the split-k matmul paths, 6 steps;
+///
+/// and writes, per configuration, the sha256 of the vars after every step and the final vars.
+#[test]
+#[ignore = "run by its gate in separate processes"]
+fn body_device_repeat_worker() {
+    use crate::tensor::Device;
+    let Ok(out) = std::env::var("DIST_TEST_OUT") else { return };
+    let out = PathBuf::from(out);
+    let device = worker_device(&DistEnv::single());
+    let mut log = String::new();
+    let item_batch = |cfg: &DecoderConfig, s: usize, b: usize, seed: u64| {
+        use rand::Rng;
+        let t = cfg.context;
+        let mut r = crate::rng::derive(seed, "repeat batch");
+        let (mut tk, mut tg, mut mk) = (vec![], vec![], vec![]);
+        for _ in 0..s * b {
+            let seq: Vec<i64> = (0..=t).map(|_| r.gen_range(0..cfg.vocab as i64)).collect();
+            tk.extend_from_slice(&seq[..t]);
+            tg.extend_from_slice(&seq[1..]);
+            mk.extend((0..t).map(|i| if i % 3 == 0 { 0.0f32 } else { 1.0 }));
+        }
+        (IntTensor::from_data(tk, [s, b, t]), IntTensor::from_data(tg, [s, b, t]), Tensor::from_data(mk, [s, b, t]))
+    };
+    // The gate's decoder through the data-parallel step (2 micro-steps, distribution off).
+    {
+        let cfg = gate_cfg();
+        let (mut vars, mut adam) = gate_state_on(false, None, device);
+        crate::tensor::set_default_device(device).unwrap();
+        let shard = Shard::new(ShardSpec { seed: 11, items: 24, micro_batch: 2, micro_steps: 2 }, 0, 1).unwrap();
+        let mut g = ProcessGroup::from_env(GroupOptions { device, ..opts("repeat") }).unwrap();
+        for step in 0..12u64 {
+            data_parallel_step(&mut g, &mut vars, &mut adam, 2, Reduce::Mean, 1.0, |l, i| gate_loss(&cfg, l, &shard.batch(step, i), step * 2 + i as u64)).unwrap();
+            log.push_str(&format!("gate {} {}\n", step + 1, state_hash(&vars).unwrap()));
+        }
+        vars.save(out.join("gate.json")).unwrap();
+        crate::tensor::set_default_device(Device::Cpu(crate::tensor::CpuMode::Reference)).unwrap();
+    }
+    // A MoE decoder and a wider decoder through train_step.
+    let mut wide = DecoderConfig::new(32, 128, 4, 64, 2, 512);
+    wide.dropout = 0.1;
+    wide.dropout_root = 7;
+    for (name, cfg, s, b, steps) in [("moe", DecoderConfig::moe_small(20, 10), 3usize, 6usize, 12u64), ("wide", wide, 2, 8, 6)] {
+        let (_, vars) = Decoder::init(cfg.clone(), s, 3).unwrap();
+        let mut vars = vars_on(&vars, device);
+        let mut opt = Adam::new(AdamConfig::adamw(3e-3, 0.01, Default::default()), ParamGroups::new(&vars), &vars);
+        crate::tensor::set_default_device(device).unwrap();
+        for step in 0..steps {
+            let (tk, tg, mk) = item_batch(&cfg, s, b, 100 + step);
+            let r = train_step(&cfg, &mut vars, &mut opt, &tk, &tg, &mk, step, AuxWeights::default(), 1.0);
+            let ce: Vec<String> = r.ce.iter().map(|x| format!("{:08x}", x.to_bits())).collect();
+            log.push_str(&format!("{name} {} {} ce {}\n", step + 1, state_hash(&vars).unwrap(), ce.join(",")));
+        }
+        vars.save(out.join(format!("{name}.json"))).unwrap();
+        crate::tensor::set_default_device(Device::Cpu(crate::tensor::CpuMode::Reference)).unwrap();
+    }
+    let key = device_key(device).unwrap().unwrap_or_else(|| "cpu-reference".into());
+    std::fs::write(out.join("steps.txt"), &log).unwrap();
+    std::fs::write(out.join("key.txt"), format!("{key}\n")).unwrap();
+}
+
+/// The prerequisite of GPU data parallelism: the same training run twice, in two processes, is
+/// byte-identical on the GPU (every per-step hash, the per-seed losses and the final vars of
+/// the three configurations of `body_device_repeat_worker`).
+#[cfg(any(all(feature = "metal", target_os = "macos"), feature = "cuda"))]
+#[test]
+fn gpu_training_is_byte_identical_run_to_run() {
+    let _guard = procs();
+    let root = scratch("gpu-repeat");
+    let run = |name: &str| {
+        let out = root.join(name);
+        std::fs::create_dir_all(&out).unwrap();
+        let t = Instant::now();
+        let st = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(worker_args("body_device_repeat_worker"))
+            .env("DIST_TEST_OUT", &out)
+            .env("DIST_TEST_DEVICE", gpu_kind())
+            .env_remove("RANK")
+            .env_remove("WORLD_SIZE")
+            .output()
+            .unwrap();
+        assert!(st.status.success(), "{}", String::from_utf8_lossy(&st.stderr));
+        eprintln!("{} repeat {name}: {:.1} s", gpu_kind(), t.elapsed().as_secs_f64());
+        out
+    };
+    let (a, b) = (run("first"), run("second"));
+    for f in ["steps.txt", "gate.json", "moe.json", "wide.json", "key.txt"] {
+        let (x, y) = (std::fs::read(a.join(f)).unwrap(), std::fs::read(b.join(f)).unwrap());
+        assert!(x == y, "{f}: the two runs differ");
+        eprintln!("{} repeat {f}: sha256 {} (both runs)", gpu_kind(), crate::hash::sha256_hex(&x));
+    }
+    let key = std::fs::read_to_string(a.join("key.txt")).unwrap();
+    assert!(key.starts_with(&format!("device={}-", gpu_kind())), "{key}");
+    eprintln!("{} repeat key: {}", gpu_kind(), key.trim());
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+/// The GPU gate: 2 processes sharing one GPU, k micro-steps each, give the weights of one
+/// process on that GPU with 2·k micro-steps, bit for bit (every per-step hash), at 2 and 4 global
+/// micro-steps; distribution off equals one process.
+#[cfg(any(all(feature = "metal", target_os = "macos"), feature = "cuda"))]
+#[test]
+fn gpu_gate_two_ranks_on_one_gpu_equal_one_gpu_with_accumulation() {
+    let _guard = procs();
+    let kind = gpu_kind();
+    let steps = 12;
+    let root = scratch("gpu-gate");
+    let mut got: BTreeMap<String, (String, BTreeMap<u64, String>)> = BTreeMap::new();
+    for (name, nproc, micro) in [("m2-one-process", 1usize, 2usize), ("m2-two-processes", 2, 2), ("m4-one-process", 1, 4), ("m4-two-processes", 2, 4)] {
+        let out = root.join(name);
+        std::fs::create_dir_all(&out).unwrap();
+        let t = Instant::now();
+        Gate::new(nproc, 1, micro, steps).on_gpu(kind).run(&out);
+        let r = results(&out, nproc);
+        let record = std::fs::read_to_string(out.join("key.txt")).unwrap();
+        assert!(record.contains(&format!("world={nproc} auth=hmac-sha256 weight_checks={} ok last_weights=", steps + 1)), "{record}");
+        assert!(record.contains(&format!("platform={} device={kind}-", platform_key())), "{record}");
+        eprintln!("{kind} gate {name}: final weights sha256 {} ({:.1} s)", crate::hash::sha256_hex(r.0.as_bytes()), t.elapsed().as_secs_f64());
+        eprintln!("{kind} gate {name}: record {}", record.lines().next().unwrap_or(""));
+        got.insert(name.to_string(), r);
+    }
+    let off = root.join("m2-distribution-off");
+    std::fs::create_dir_all(&off).unwrap();
+    let st = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(worker_args("body_ddp_worker"))
+        .env("DIST_TEST_OUT", &off)
+        .env("DIST_TEST_MICRO", "2")
+        .env("DIST_TEST_STEPS", steps.to_string())
+        .env("DIST_TEST_DEVICE", kind)
+        .env_remove("RANK")
+        .env_remove("WORLD_SIZE")
+        .output()
+        .unwrap();
+    assert!(st.status.success(), "{}", String::from_utf8_lossy(&st.stderr));
+    let r = results(&off, 1);
+    eprintln!("{kind} gate m2-distribution-off: final weights sha256 {}", crate::hash::sha256_hex(r.0.as_bytes()));
+    got.insert("m2-distribution-off".into(), r);
+    for (base, others) in [("m2-one-process", ["m2-two-processes", "m2-distribution-off"].as_slice()), ("m4-one-process", ["m4-two-processes"].as_slice())] {
+        let b = &got[base];
+        assert_eq!(b.1.len(), steps);
+        for n in others {
+            assert!(got[*n].0 == b.0, "{n}: the final weights differ from {base}");
+            assert_eq!(got[*n].1, b.1, "{n}: the per-step hashes");
+        }
+    }
+    assert_ne!(got["m2-one-process"].0, got["m4-one-process"].0, "2 and 4 micro-steps train differently");
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+/// The GPU resume gate: 2 processes sharing one GPU, rank 1 killed at step 7, resumed from the
+/// checkpoint of step 6: the uninterrupted run's weights and per-step hashes. Resuming with one
+/// process (another world size) is refused, and so is resuming on the CPU (another key).
+#[cfg(any(all(feature = "metal", target_os = "macos"), feature = "cuda"))]
+#[test]
+fn gpu_gate_kill_and_resume_equals_the_uninterrupted_run() {
+    let _guard = procs();
+    let kind = gpu_kind();
+    let root = scratch("gpu-resume");
+    let (nproc, micro, every, kill_rank, at, steps) = (2usize, 2usize, 3usize, 1usize, 7u64, 12usize);
+    let whole = root.join("uninterrupted");
+    std::fs::create_dir_all(&whole).unwrap();
+    Gate::new(nproc, 1, micro, steps).on_gpu(kind).run(&whole);
+    let want = results(&whole, nproc);
+    let out = killed_and_resumed("killed", &root, nproc, micro, steps, every, kill_rank, at, Some(kind));
+    let got = results(&out, nproc);
+    eprintln!("{kind} resume W {nproc}: final weights sha256 {} (uninterrupted {})", crate::hash::sha256_hex(got.0.as_bytes()), crate::hash::sha256_hex(want.0.as_bytes()));
+    assert!(got.0 == want.0, "the resumed run's final weights differ from the uninterrupted run's");
+    assert_eq!(got.1, want.1, "the per-step hashes");
+    // One process: another world size, refused.
+    let cfg = Gate::new(1, 1, micro, steps).on_gpu(kind).with("DIST_TEST_RESUME", 1).configs(&out).remove(0);
+    let e = run(&cfg).unwrap_err();
+    assert!(e.message().contains("rank 0 failed"), "{e}");
+    assert!(logs(&out).contains("resume refused") && logs(&out).contains("world size"), "{}", logs(&out));
+    // Two processes on the CPU: the same world size, another key, refused.
+    let cfg = Gate::new(nproc, 1, micro, steps).with("DIST_TEST_RESUME", 1).configs(&out).remove(0);
+    let e = run(&cfg).unwrap_err();
+    assert!(e.message().contains("failed"), "{e}");
+    assert!(logs(&out).contains("another platform or device: resume refused"), "{}", logs(&out));
+    eprintln!("{kind} resume: refused at world size 1 and on the CPU");
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+/// A job whose ranks train on different kinds of device (rank 0 on the GPU, rank 1 on the CPU)
+/// is refused at the rendezvous, before step 0, on every rank.
+#[cfg(any(all(feature = "metal", target_os = "macos"), feature = "cuda"))]
+#[test]
+fn gpu_a_job_mixing_gpu_and_cpu_ranks_is_refused() {
+    let _guard = procs();
+    let out = scratch("gpu-mixed");
+    let cfg = Gate::new(2, 1, 2, 2).on_gpu(gpu_kind()).with("DIST_TEST_CPU_RANKS", 1).configs(&out).remove(0);
+    let e = run(&cfg).unwrap_err();
+    assert!(e.message().contains("failed"), "{e}");
+    let text = logs(&out);
+    assert!(text.contains("refused the job") && text.contains("a mixed job") && text.contains(" device="), "{text}");
+    assert!(!out.join("rank-0.steps").exists() && !out.join("rank-1.steps").exists(), "no step was taken");
+    std::fs::remove_dir_all(&out).unwrap();
 }

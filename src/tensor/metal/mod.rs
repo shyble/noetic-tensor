@@ -353,6 +353,33 @@ impl Context {
         &self.name
     }
 
+    /// What the device's results depend on outside this crate, for platform keys: the highest
+    /// Apple and Metal GPU families it supports (and Mac2), its architecture's name (macOS 14+),
+    /// and the OS version and build (the OS compiles the kernels' source).
+    pub(crate) fn platform_details(&self) -> String {
+        let _pool = Pool::new();
+        // SAFETY: every message below is sent with its method's exact signature, to live objects,
+        // after checking that the receiver responds to it.
+        unsafe {
+            let d = self.device;
+            let supports = |f: isize| ffi::responds(d, ffi::sel!("supportsFamily:")) && msg!(bool; d, "supportsFamily:", f => isize);
+            // MTLGPUFamilyApple1 = 1001 …, MTLGPUFamilyMac2 = 2002, MTLGPUFamilyMetal3 = 5001 ….
+            let apple = (1001..=1030).rev().find(|f| supports(*f)).map_or("none".to_string(), |f| format!("apple{}", f - 1000));
+            let metal = (5001..=5020).rev().find(|f| supports(*f)).map_or("none".to_string(), |f| format!("metal{}", f - 5000 + 2));
+            let mac2 = if supports(2002) { "-mac2" } else { "" };
+            let arch = if ffi::responds(d, ffi::sel!("architecture")) {
+                let a: Id = msg!(Id; d, "architecture");
+                if a.is_null() { "unknown".to_string() } else { ffi::string_of(msg!(Id; a, "name")) }
+            } else {
+                "unknown".to_string()
+            };
+            let info: Id = msg!(Id; ffi::class(c"NSProcessInfo"), "processInfo");
+            let os = ffi::string_of(msg!(Id; info, "operatingSystemVersionString"));
+            let clean = |s: &str| s.chars().map(|c| if c.is_ascii_alphanumeric() || c == '.' { c } else { '_' }).collect::<String>();
+            format!("family-{apple}-{metal}{mac2}-arch-{}-macos-{}", clean(&arch), clean(&os))
+        }
+    }
+
     fn pipeline(&mut self, kernel: &'static str) -> std::result::Result<Id, String> {
         if let Some(p) = self.pipelines.get(kernel) {
             return Ok(*p);

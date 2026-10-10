@@ -8,7 +8,7 @@
 //! and a barrier ends the checkpoint: once any rank is past it, the checkpoint is on disk whole
 //! and verified. Other nodes may keep copies, kept only if they hold the same bytes. A resume
 //! checks every hash, that every rank loaded the same checkpoint, the cursors, and refuses
-//! another world size or job key.
+//! another world size, job key or group key (platform and device).
 
 use super::ddp::state_hash;
 use super::group::ProcessGroup;
@@ -203,7 +203,9 @@ impl Checkpoint {
     /// - Every rank must have loaded the same checkpoint (the same sha256 of its meta file):
     ///   node copies are used only if they hold the same bytes.
     /// - The checkpoint must hold a cursor for every rank.
-    /// - A checkpoint of another world size or job key is refused.
+    /// - A checkpoint of another world size or job key is refused, and one taken under another
+    ///   group key (another platform or device: a CPU checkpoint on a GPU, another GPU model or
+    ///   driver) too.
     pub fn load_latest(group: &mut ProcessGroup, dir: &Path) -> Result<Option<Checkpoint>> {
         let latest = dir.join("latest");
         let mine: Result<Option<Checkpoint>> = if latest.exists() {
@@ -229,6 +231,14 @@ impl Checkpoint {
                 c.meta.job_key,
                 group.world_size(),
                 group.options().job_key
+            )));
+        }
+        if c.meta.group_key != group.key() {
+            return Err(NnError::Dist(format!(
+                "the checkpoint at step {} was taken under the key {:?}; this run's key is {:?} (another platform or device: resume refused)",
+                c.meta.step,
+                c.meta.group_key,
+                group.key()
             )));
         }
         if c.meta.cursors.len() != group.world_size() {

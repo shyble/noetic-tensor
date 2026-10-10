@@ -101,13 +101,48 @@ unsafe impl Send for Ctx {}
 
 static CTX: OnceLock<std::result::Result<Mutex<Ctx>, String>> = OnceLock::new();
 
+/// The CUDA device this process uses, fixed by its first use (Cuda(0) unless a tensor or a call
+/// names another first). One device per process, as in data-parallel training, where each rank
+/// is a process with its own GPU.
+static ORDINAL: OnceLock<usize> = OnceLock::new();
+
+/// Use `Cuda(i)` in this process: fixes the process's device on first use; another device
+/// afterwards is `Unsupported`. A device other than Cuda(0) is fixed only once the driver shows
+/// it exists (a missing one is `Unsupported` and fixes nothing); Cuda(0) touches no driver here,
+/// as before.
+pub(crate) fn claim(i: usize) -> Result<()> {
+    if ORDINAL.get().is_none() && i > 0 {
+        if crate::tensor::device::is_pinned() {
+            return Err(TensorError::Unsupported(format!("this process is pinned to the reference backend; Cuda({i}) cannot be selected")));
+        }
+        // SAFETY: plain driver calls with an out-pointer to a local.
+        let count = unsafe {
+            let mut count = 0;
+            if cuInit(0) != CUDA_SUCCESS || cuDeviceGetCount(&mut count) != CUDA_SUCCESS {
+                return Err(TensorError::Unsupported(format!("Cuda({i}): the CUDA driver did not start")));
+            }
+            count.max(0) as usize
+        };
+        if i >= count {
+            return Err(TensorError::Unsupported(format!("Cuda({i}): this machine has {count} CUDA device(s)")));
+        }
+    }
+    let o = *ORDINAL.get_or_init(|| i);
+    if o == i {
+        Ok(())
+    } else {
+        Err(TensorError::Unsupported(format!("Cuda({i}): this process uses Cuda({o}); the CUDA backend runs on one device per process")))
+    }
+}
+
 #[cfg(test)]
 /// Whether this process has created the CUDA context.
 pub(crate) fn initialized() -> bool {
     CTX.get().is_some()
 }
 
-/// The CUDA context of device 0 (created on first use). Refused in a pinned process.
+/// The CUDA context of the process's device (`claim`; created on first use). Refused in a
+/// pinned process.
 pub(crate) fn context() -> Result<MutexGuard<'static, Ctx>> {
     if crate::tensor::device::is_pinned() {
         return Err(TensorError::Device("this process is pinned to the reference backend; CUDA cannot be initialised".into()));
@@ -143,8 +178,12 @@ impl Ctx {
             if count < 1 {
                 return Err(dev_err("device", "no CUDA device on this machine"));
             }
+            let ordinal = *ORDINAL.get_or_init(|| 0);
+            if ordinal >= count as usize {
+                return Err(dev_err("device", format!("Cuda({ordinal}): this machine has {count} CUDA device(s)")));
+            }
             let mut dev: CUdevice = 0;
-            cu(cuDeviceGet(&mut dev, 0), "cuDeviceGet")?;
+            cu(cuDeviceGet(&mut dev, ordinal as std::ffi::c_int), "cuDeviceGet")?;
             let mut name = [0 as std::ffi::c_char; 256];
             cu(cuDeviceGetName(name.as_mut_ptr(), 256, dev), "cuDeviceGetName")?;
             let attr = |a| -> Result<i32> {
@@ -835,6 +874,13 @@ impl GpuBackend for CudaBackend {
         let c = context()?;
         let src = crate::hash::sha256_hex(super::kernels::SOURCE.as_bytes());
         Ok(format!("cuda-{}-sm{}{}-driver{}-nvrtc{}.{}-nofastmath-fmadoff-kernels-{}", c.name.replace(' ', "_"), c.cc.0, c.cc.1, c.driver, c.nvrtc.0, c.nvrtc.1, &src[..16]))
+    }
+
+    fn platform_details(&self) -> Result<String> {
+        // The driver's JIT compiles the kernels' PTX: its release (e.g. 576.88) is part of the
+        // key, beside the CUDA version it supports (`driver…` in `key`) and NVRTC's.
+        drop(context()?);
+        Ok(format!("driver-release-{}", super::driver_release()?))
     }
 }
 

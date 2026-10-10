@@ -1,6 +1,6 @@
 // Records the compiler version for the platform key (`tensor::platform_key`), and links the GPU
 // backends' system libraries when their feature is set: with `metal` (macOS) Metal.framework,
-// Foundation and libobjc; with `cuda` the CUDA driver, NVRTC and cuBLAS from the toolkit at
+// Foundation and libobjc; with `cuda` the CUDA driver, NVRTC, cuBLAS and NVML from the toolkit at
 // CUDA_PATH (or CUDA_HOME, else /usr/local/cuda).
 fn main() {
     let rustc = std::env::var("RUSTC").unwrap_or_else(|_| "rustc".into());
@@ -28,7 +28,8 @@ fn link_cuda() {
     for d in dirs.iter().filter(|d| d.is_dir()) {
         println!("cargo:rustc-link-search=native={}", d.display());
     }
-    for lib in ["cuda", "nvrtc", "cublas"] {
+    // NVML (the driver's management library) gives the driver's release for the platform key.
+    for lib in ["cuda", "nvrtc", "cublas", if windows { "nvml" } else { "nvidia-ml" }] {
         println!("cargo:rustc-link-lib=dylib={lib}");
     }
 }

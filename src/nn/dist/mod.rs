@@ -15,6 +15,12 @@
 //!   number of global micro-steps, not on how the ranks share them; it stays in the run's record
 //!   (`ProcessGroup::record`), and a checkpoint refuses to resume at another world size.
 //!
+//! **Devices.** Each rank trains on one device (`GroupOptions::device`, from `LOCAL_RANK` through
+//! `DistEnv::device`): the CPU reference backend, Metal or CUDA. Gradients are summed on the host
+//! in the same order whatever the device; a GPU's kind, model and versions enter the key
+//! (`device_key`), so CPU and GPU runs never share one. Tested on one machine per GPU kind, with
+//! several processes on one GPU; multi-GPU and multi-machine runs are untested.
+//!
 //! A fast mode (backend-native reduction order, overlap) may come later; it will carry its own
 //! key and is never mixed with this one.
 //!
@@ -39,7 +45,7 @@ mod tests;
 pub use auth::JobSecret;
 pub use checkpoint::{Checkpoint, CheckpointMeta, CHECKPOINT_FORMAT};
 pub use ddp::{check_in_sync, data_parallel_step, state_hash};
-pub use env::{platform_key, DistEnv};
+pub use env::{device_key, platform_key, DeviceKind, DistEnv};
 pub use group::{GroupOptions, ProcessGroup};
 pub use launch::{free_port, run, spawn, Job, LaunchConfig};
 pub use reduce::{GradSum, Reduce};
