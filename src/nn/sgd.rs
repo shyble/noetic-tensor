@@ -47,6 +47,15 @@ impl Sgd {
     pub fn buffers(&self) -> &[Option<Tensor>] {
         &self.buf
     }
+
+    /// Restore saved momentum buffers (one slot per var; as `buffers` gives them).
+    pub fn set_buffers(&mut self, buf: Vec<Option<Tensor>>) -> Result<(), String> {
+        if buf.len() != self.buf.len() {
+            return Err(format!("{} momentum slots for {} vars", buf.len(), self.buf.len()));
+        }
+        self.buf = buf;
+        Ok(())
+    }
 }
 
 impl Optimizer for Sgd {

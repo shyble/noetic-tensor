@@ -28,6 +28,8 @@ fn link_cuda() {
     for d in dirs.iter().filter(|d| d.is_dir()) {
         println!("cargo:rustc-link-search=native={}", d.display());
     }
+    // NVML (the driver's release, for distributed runs' platform key) is loaded at run time, not
+    // linked: the backend builds and runs on one device where it is missing.
     for lib in ["cuda", "nvrtc", "cublas"] {
         println!("cargo:rustc-link-lib=dylib={lib}");
     }

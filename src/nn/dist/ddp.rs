@@ -35,12 +35,8 @@ pub fn check_in_sync(group: &mut ProcessGroup, vars: &VarMap) -> Result<String> 
     Ok(h)
 }
 
-/// One data-parallel optimizer step.
-///
-/// For each of this rank's `micro_steps_per_rank` micro-steps i, `micro(lifted, i)` builds the loss
-/// to differentiate from the lifted vars (a fresh `VarMap::lifted` per micro-step); its gradients
-/// go into the rank's `GradSum`. The sums are all-reduced in global order and scaled by `how`,
-/// and `opt` takes one step with them. Returns the number of micro-steps summed over every rank.
+/// One data-parallel optimizer step: `data_parallel_grads`, then `opt` steps with the summed
+/// gradients on every rank. Returns the number of micro-steps summed over every rank.
 ///
 /// With the single-process group this is gradient accumulation over `micro_steps_per_rank`
 /// micro-steps, through the same sum: W ranks with k micro-steps each and one process with W·k
@@ -54,8 +50,34 @@ pub fn data_parallel_step(
     micro_steps_per_rank: usize,
     how: Reduce,
     lr_scale: f64,
-    mut micro: impl FnMut(&VarMap, usize) -> Tensor,
+    micro: impl FnMut(&VarMap, usize) -> Tensor,
 ) -> Result<usize> {
+    let (grads, count) = data_parallel_grads(group, vars, micro_steps_per_rank, how, micro)?;
+    opt.step(vars, grads, lr_scale);
+    Ok(count)
+}
+
+/// The summed gradients of one data-parallel step, the same on every rank, by var index (None:
+/// no micro-step on any rank used the var), and the number of micro-steps summed; for a caller
+/// that transforms them (clips them, say) before its optimizer steps, as every rank must then
+/// do identically.
+///
+/// The vars must live on the group's device (`GroupOptions::device`). For each of this rank's
+/// `micro_steps_per_rank` micro-steps i, `micro(lifted, i)` builds the loss to differentiate from
+/// the lifted vars (a fresh `VarMap::lifted` per micro-step). Each micro-step's gradients are
+/// copied to the host as f32 and summed there by `GradSum` in the flat rank order, whatever the
+/// device; the sum is scaled by `how` and goes back to the vars' devices.
+pub fn data_parallel_grads(
+    group: &mut ProcessGroup,
+    vars: &VarMap,
+    micro_steps_per_rank: usize,
+    how: Reduce,
+    mut micro: impl FnMut(&VarMap, usize) -> Tensor,
+) -> Result<(Vec<Option<Tensor>>, usize)> {
+    // The run's key names the group's device: the vars must live there.
+    if let Some((i, t)) = vars.tensors().iter().enumerate().find(|(_, t)| t.device() != group.device()) {
+        return Err(NnError::Dist(format!("var {:?} is on {:?}, the group trains on {:?} (GroupOptions::device)", vars.names()[i], t.device(), group.device())));
+    }
     let mut sum = group.grad_sum(vars);
     for i in 0..micro_steps_per_rank {
         let lifted = vars.lifted();
@@ -68,6 +90,5 @@ pub fn data_parallel_step(
     if count == 0 {
         return Err(NnError::Dist("a step without micro-steps on any rank".into()));
     }
-    opt.step(vars, sum.finish(how), lr_scale);
-    Ok(count)
+    Ok((sum.finish(how), count))
 }

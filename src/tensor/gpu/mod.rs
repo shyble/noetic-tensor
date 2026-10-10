@@ -1,5 +1,5 @@
 //! GPU backends, behind off-by-default cargo features: `metal` (macOS) and
-//! `cuda` (the CUDA driver, NVRTC; Device::Cuda(0)). No
+//! `cuda` (the CUDA driver, NVRTC; one `Device::Cuda(i)` per process). No
 //! crate is added: the system frameworks are reached through hand-written FFI.
 //!
 //! `BackendStorage` (the CPU kernel set) takes host slices and Rust closures, which a GPU cannot
@@ -184,6 +184,8 @@ pub(crate) trait GpuBackend: Sync {
     }
     /// The device's provenance key.
     fn key(&self) -> Result<String>;
+    /// What else the device's results depend on, outside this crate (for `gpu_platform_key`).
+    fn platform_details(&self) -> Result<String>;
     /// Optional: nn::Adam's plain update of contiguous f32 `p`, `g`, `m`, `v` (n elements)
     /// fused into one kernel with the op sequence's f32 arithmetic; returns (p, m, v). The default
     /// is Unsupported: the caller runs the op sequence.
@@ -220,8 +222,8 @@ pub(crate) fn backend_for(device: Device) -> Result<&'static dyn GpuBackend> {
         Device::Metal(i) if cfg!(all(feature = "metal", target_os = "macos")) => Err(TensorError::Unsupported(format!("Metal({i}): this machine has one Metal device, Metal(0)"))),
         Device::Metal(i) => Err(TensorError::Unsupported(format!("Metal({i}): this build has no Metal backend (the `metal` feature, macOS)"))),
         #[cfg(feature = "cuda")]
-        Device::Cuda(0) => Ok(&super::cuda::backend::CUDA),
-        Device::Cuda(i) if cfg!(feature = "cuda") => Err(TensorError::Unsupported(format!("Cuda({i}): the CUDA backend runs on Cuda(0) only"))),
+        Device::Cuda(i) => super::cuda::backend::claim(i).map(|()| &super::cuda::backend::CUDA as &'static dyn GpuBackend),
+        #[cfg(not(feature = "cuda"))]
         Device::Cuda(i) => Err(TensorError::Unsupported(format!("Cuda({i}): this build has no CUDA backend (the `cuda` feature)"))),
         Device::Cpu(_) => Err(TensorError::Unsupported("the CPU is not a GPU backend".into())),
     }
@@ -669,6 +671,15 @@ pub(crate) fn gpu_adam(p: &Tensor, g: &Tensor, m: &Tensor, v: &Tensor, s: &AdamS
 /// The provenance key of a GPU device (its name and the kernel options), e.g. for run records.
 pub fn gpu_key(device: Device) -> Result<String> {
     backend_for(device)?.key()
+}
+
+/// The GPU part of a platform key: `gpu_key` followed by what the device's results depend on
+/// outside this crate. On CUDA, the driver release (from NVML; the driver compiles the kernels'
+/// PTX); on Metal, the GPU's families and architecture and the OS build (the OS compiles the
+/// kernels' source). `gpu_key` itself is unchanged.
+pub fn gpu_platform_key(device: Device) -> Result<String> {
+    let b = backend_for(device)?;
+    Ok(format!("{}-{}", b.key()?, b.platform_details()?))
 }
 
 /// Wait for every kernel encoded on `device`.

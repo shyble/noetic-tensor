@@ -1,6 +1,18 @@
 //! The process's place in a job, from torchrun's environment variables.
 
 use crate::error::{NnError, Result};
+use crate::tensor::{CpuMode, Device};
+
+/// The kind of device the ranks train on (see `DistEnv::device`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum DeviceKind {
+    /// The CPU reference backend (`Cpu(Reference)`).
+    Cpu,
+    /// Apple Metal (feature `metal`).
+    Metal,
+    /// NVIDIA CUDA (feature `cuda`).
+    Cuda,
+}
 
 /// Rank, world size and the coordinator's address, as torchrun passes them.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -73,6 +85,23 @@ impl DistEnv {
         Ok(Some(DistEnv { rank, world_size, rank_in_node, node_size, node_rank, master_addr, master_port }))
     }
 
+    /// This rank's device, from its rank on the node as torchrun's `cuda:LOCAL_RANK`: GPU number
+    /// `LOCAL_RANK / ranks_per_device` of `kind`, or the CPU reference backend for `Cpu`. With
+    /// `ranks_per_device` 1 each rank has a GPU of its own; with more, that many consecutive
+    /// ranks share one (several processes on one GPU, as the gates run on one machine).
+    /// The device is not opened here: `ProcessGroup::init` checks it when it builds the key.
+    pub fn device(&self, kind: DeviceKind, ranks_per_device: usize) -> Result<Device> {
+        if ranks_per_device == 0 {
+            return Err(NnError::Dist("ranks_per_device must be at least 1".into()));
+        }
+        let i = self.rank_in_node / ranks_per_device;
+        Ok(match kind {
+            DeviceKind::Cpu => Device::Cpu(CpuMode::Reference),
+            DeviceKind::Metal => Device::Metal(i),
+            DeviceKind::Cuda => Device::Cuda(i),
+        })
+    }
+
     /// The variables that describe this process, as the launcher sets them.
     pub fn to_vars(&self) -> Vec<(String, String)> {
         let vals = [
@@ -94,6 +123,21 @@ impl DistEnv {
 /// last bits may differ between systems. The rendezvous refuses a job whose ranks differ in it.
 pub fn platform_key() -> String {
     format!("{} libm={}", crate::tensor::platform_key(), maths_fingerprint())
+}
+
+/// The device part of a rank's platform key: None for the CPU reference backend (whose key is
+/// `platform_key()` alone, as in 0.3.0), else `device=<the GPU's platform key>`
+/// (`tensor::gpu_platform_key`: the GPU model and compute capability, the CUDA version the driver
+/// supports, the driver's release and NVRTC's version on CUDA; the GPU's families and
+/// architecture and the OS build on Metal; the kernel source's hash). A CPU and a GPU run, or
+/// two GPU models, never share a key. The fast CPU backend is not a device of the deterministic
+/// mode (refused).
+pub fn device_key(device: Device) -> Result<Option<String>> {
+    match device {
+        Device::Cpu(CpuMode::Reference) => Ok(None),
+        Device::Cpu(CpuMode::Fast) => Err(NnError::Dist("the fast CPU backend is not a device of the deterministic mode (use Cpu(Reference), Metal or Cuda)".into())),
+        d => crate::tensor::gpu_platform_key(d).map(|k| Some(format!("device={k}"))).map_err(|e| NnError::Dist(format!("{d:?}: {e}"))),
+    }
 }
 
 /// sha256 of the bits of f32 and f64 `exp`, `ln`, `powf` and `tanh` on fixed inputs that span the

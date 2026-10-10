@@ -1,5 +1,27 @@
 # Changes
 
+## Unreleased
+
+**Data-parallel ranks on a GPU** (`nn::dist`, deterministic mode only): built; tested on one machine per GPU kind (CUDA: Windows x86_64, one RTX 4060 Laptop GPU shared by up to four processes; Metal: macOS aarch64, one Apple GPU shared by two processes; shown: the same training twice byte-identical on the GPU, and byte-identical weights and per-step hashes for 2 and 4 ranks against 1 GPU with accumulation, with absent gradients (−0 and +0), an idle weight under AdamW's decay, gradient clipping, and a killed and resumed run under AdamW and under SGD with momentum); multi-GPU, multi-machine and datacenter runs untested (no multi-GPU machine available yet). Windows ran every gate with no skips; the Mac, shared with a long benchmark, skipped the runs needing 4 processes at once. See "GPU ranks" in `doc/distributed.md`.
+
+- **One device per rank.** `DistEnv::device(kind, ranks_per_device)` gives the rank's device from `LOCAL_RANK` (torchrun's `cuda:LOCAL_RANK`; several ranks may share a GPU); `GroupOptions::device` is the rank's device, and the data-parallel step refuses vars on another device. Gradients are copied to the host and summed by `GradSum` in the flat rank order, as in 0.3.0; every rank takes the same optimizer step on its device. No overlap or bucketing yet.
+- **`GroupOptions`** gains the field `device` and is now `#[non_exhaustive]`, with `GroupOptions::new` and `with_*` builder methods: struct literals no longer compile outside the crate (breaking), and later fields will not break callers again. Its fields stay public to read and set.
+- **Keys.** On a GPU the platform key gains `device=` and the GPU's platform key (`tensor::gpu_platform_key`): on CUDA the GPU model and compute capability, the driver's release and the CUDA version it supports, NVRTC's version and the kernel source's hash; on Metal the GPU, its families and architecture, the OS build and the kernel source's hash. CPU and GPU results never share a key and are never compared byte for byte; a job mixing devices is refused at the rendezvous. The CPU reference backend's key is unchanged.
+- **NVML** (the driver's management library) gives the driver's release. It is loaded at run time, not linked: the `cuda` feature builds, and a process trains on one GPU, where NVML is missing; there `device_key` is an error, and a GPU key is never made without the driver's release.
+- **The fast CPU backend is refused** as a device of the deterministic mode (`device_key(Cpu(Fast))` is an error); a fast mode returns later only under its own key.
+- **Resume** refuses a checkpoint taken under another group key (another platform or device), besides another world size or job key.
+- **SGD with momentum is checkpointed.** `Checkpoint::save` and `restore` take any `CheckpointOptimizer` (Adam or SGD); an SGD checkpoint holds the momentum buffers, and a resume into another kind of optimizer than the checkpoint's is refused, so no run resumes without its optimizer state. Adam checkpoints are written byte for byte as in 0.3.0. `Checkpoint` holds `optimizer_state` in place of `adam_m` and `adam_v`, and `CheckpointMeta` gains `optimizer` (breaking).
+- **`data_parallel_grads`** returns a step's summed gradients, the same on every rank, for callers that clip them before their optimizer steps.
+- **CUDA backend:** runs on `Cuda(i)`, one device per process (fixed by the first use; `Cuda(0)` by default); a device the machine lacks is refused. `Cuda(i)` for i > 0 is untested, and results that must be exact should not rely on it until a two-GPU gate passes.
+- **Single-device behaviour is unchanged.** The six training configurations give byte-identical final weights and logits to 0.3.0 (0.3.0 built and run now as the reference) on the CPU reference backend (macOS aarch64, Windows x86_64), on CUDA and on Metal; the 0.3.0 CPU gates give 0.3.0's hashes. No kernel source changes.
+- **`tensor::cuda::kernel_ptx_and_cubin(cc)`** (diagnostics): NVRTC's PTX for the kernel source, byte for byte the PTX the backend loads, and the CUBIN NVRTC makes for the real architecture (`nvrtcGetCUBIN`), so a GPU run can record its PTX and machine code (NVRTC's machine code, which need not be the driver's compilation of the PTX). Tested on an RTX 4060 Laptop GPU.
+- **Tests:** the kernel sources hold no atomic operations; `DIST_TEST_MAX_PROCS`, a development switch, lets a shared machine skip the gate runs needing more processes at once (each skip is printed).
+
+**Tested** (measured on 0.3.0's code, before this release's changes):
+
+- Built and tested on Linux x86_64 (CPU) and on NVIDIA A100-SXM4-80GB and L4 (NVIDIA driver 595.91.07, CUDA driver API 13.2; NVRTC 12.8, cuBLAS 12.8.4); determinism gates passed: run-to-run identical within each GPU model and key (sm80, sm89).
+- On one 200-step training probe, the CUDA trace was byte-identical on A100, L4 and an RTX 4060 Laptop GPU (two drivers, two NVRTC/cuBLAS versions). This is a measured instance, not a guarantee: other workloads are untested, and results remain keyed per GPU model and driver.
+
 ## 0.3.0
 
 **Data-parallel training on the CPU** (`nn::dist`), with an API in the shape of torch.distributed, DDP and torchrun: a process group from torchrun's environment variables, rank-ordered collectives over TCP (standard library only, no new dependency), a data-parallel step, a sharded sampler, coordinated checkpoints and a launcher (`examples/launch.rs`). See `doc/distributed.md`.
