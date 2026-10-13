@@ -1,6 +1,6 @@
 # Distributed training: deterministic data parallelism (first step)
 
-Released in 0.3.0 (9 October 2026) for the CPU. Released in 0.4.0 (10 October 2026): ranks on a GPU, one device per rank (see "GPU ranks" below); built; tested on one machine per GPU kind (CUDA: up to four processes sharing one RTX 4060 Laptop GPU on Windows; Metal: two processes sharing one Apple GPU on macOS; shown: byte-identical weights to one GPU with accumulation, with absent gradients, an idle weight under decay, clipping, and a killed and resumed run under AdamW and under SGD with momentum); multi-GPU, multi-machine and datacenter runs untested (no multi-GPU machine available yet).
+Released in 0.3.0 (9 October 2026) for the CPU. Released in 0.4.0 (10 October 2026): ranks on a GPU, one device per rank (see "GPU ranks" below); built; tested on one machine per GPU kind (CUDA: up to four processes sharing a single CUDA GPU on Windows; Metal: two processes sharing one Apple GPU on macOS; shown: byte-identical weights to one GPU with accumulation, with absent gradients, an idle weight under decay, clipping, and a killed and resumed run under AdamW and under SGD with momentum); multi-GPU, multi-machine and datacenter runs untested.
 
 ## What it adds
 
@@ -128,7 +128,7 @@ The whole gate (27 distributed tests, plus the HMAC vectors) runs in about 5 s: 
 
 ## GPU ranks (0.4.0)
 
-Status: built; tested on one machine per GPU kind (the configurations and results below); multi-GPU, multi-machine and datacenter runs untested (no multi-GPU machine available yet). GPU results are keyed apart from CPU results and are never compared byte for byte with them.
+Status: built; tested on one machine per GPU kind (the configurations and results below); multi-GPU, multi-machine and datacenter runs untested. GPU results are keyed apart from CPU results and are never compared byte for byte with them.
 
 **What changes.**
 - **One device per rank.** `DistEnv::device(kind, ranks_per_device)` gives the rank's device from its rank on the node (`LOCAL_RANK`), as torchrun's `cuda:LOCAL_RANK`: `Cuda(LOCAL_RANK / ranks_per_device)`, `Metal(…)` likewise, or `Cpu(Reference)`. With `ranks_per_device` 1 each rank has its own GPU; with more, that many ranks share one (how the gates below run on one GPU). `GroupOptions::device` is the rank's device; `data_parallel_step` refuses vars that are not on it.
