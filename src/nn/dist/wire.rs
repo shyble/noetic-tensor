@@ -28,6 +28,7 @@ pub(crate) enum Op {
     ResultChunk = 10,
     Challenge = 11,
     LinkAck = 12,
+    ScatterResult = 13,
 }
 
 impl Op {
@@ -43,11 +44,12 @@ impl Op {
             Op::ResultMeta | Op::ResultChunk => "all-reduce result",
             Op::Challenge => "challenge",
             Op::LinkAck => "link answer",
+            Op::ScatterResult => "reduce-scatter result",
         }
     }
 
     fn from_u32(v: u32) -> Option<Op> {
-        [Op::Hello, Op::Table, Op::Link, Op::Barrier, Op::Broadcast, Op::Gather, Op::ReduceMeta, Op::ReduceChunk, Op::ResultMeta, Op::ResultChunk, Op::Challenge, Op::LinkAck].into_iter().find(|o| *o as u32 == v)
+        [Op::Hello, Op::Table, Op::Link, Op::Barrier, Op::Broadcast, Op::Gather, Op::ReduceMeta, Op::ReduceChunk, Op::ResultMeta, Op::ResultChunk, Op::Challenge, Op::LinkAck, Op::ScatterResult].into_iter().find(|o| *o as u32 == v)
     }
 }
 

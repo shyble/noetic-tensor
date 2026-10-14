@@ -181,7 +181,13 @@ impl GradSum {
 
     /// The step's gradients, by var index, on each var's device: the folded sum scaled by `how`
     /// (a deferred sum is folded first, as one process would).
-    pub fn finish(mut self, how: Reduce) -> Vec<Option<Tensor>> {
+    pub fn finish(self, how: Reduce) -> Vec<Option<Tensor>> {
+        let slots = self.slots.clone();
+        slots.into_iter().zip(self.finish_host(how)).map(|(s, v)| v.map(|v| Tensor::from_data(v, s.shape).to(s.device))).collect()
+    }
+
+    /// `finish` on the host: the folded sum scaled by `how`, by var index, as f32 values.
+    pub(crate) fn finish_host(mut self, how: Reduce) -> Part {
         let count = self.count;
         if self.deferred {
             let mut acc: Option<Part> = None;
@@ -193,21 +199,22 @@ impl GradSum {
             }
             self.acc = acc;
         }
-        let Some(acc) = self.acc else { return vec![None; self.slots.len()] };
-        self.slots
-            .into_iter()
-            .zip(acc)
-            .map(|(s, v)| {
-                v.map(|mut v| {
-                    if how == Reduce::Mean && count != 1 {
-                        let c = count as f32;
-                        for x in v.iter_mut() {
-                            *x /= c;
-                        }
-                    }
-                    Tensor::from_data(v, s.shape).to(s.device)
-                })
-            })
-            .collect()
+        let Some(mut acc) = self.acc else { return vec![None; self.slots.len()] };
+        for v in acc.iter_mut().flatten() {
+            scale(v, how, count);
+        }
+        acc
+    }
+}
+
+/// Scale a summed gradient of `count` micro-steps by `how`, in place: `Reduce::Mean` divides
+/// every element by the count as f32 (`x / c`, as `Tensor::div_scalar` does), and not at all
+/// when there was one micro-step. The one scaling of the all-reduce and the reduce-scatter.
+pub(crate) fn scale(v: &mut [f32], how: Reduce, count: usize) {
+    if how == Reduce::Mean && count != 1 {
+        let c = count as f32;
+        for x in v.iter_mut() {
+            *x /= c;
+        }
     }
 }

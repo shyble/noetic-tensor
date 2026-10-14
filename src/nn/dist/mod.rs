@@ -38,6 +38,7 @@ mod launch;
 mod reduce;
 mod shard;
 mod wire;
+mod zero;
 
 #[cfg(test)]
 mod tests;
@@ -50,3 +51,4 @@ pub use group::{GroupOptions, ProcessGroup};
 pub use launch::{free_port, run, spawn, Job, LaunchConfig};
 pub use reduce::{GradSum, Reduce};
 pub use shard::{Shard, ShardSpec};
+pub use zero::{Partition, Piece, ShardCheckpoint, ShardCheckpointMeta, ShardGrads, ShardLayout, ShardMemory, ShardOptions, ShardRank, ShardStage, ShardedDataParallel, SHARD_CHECKPOINT_FORMAT};

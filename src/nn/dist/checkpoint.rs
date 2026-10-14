@@ -120,7 +120,7 @@ impl CheckpointOptimizer for Sgd {
 }
 
 /// A per-var tensor set as a var map: the vars that have a tensor, under their names.
-fn set_map(vars: &VarMap, set: &[Option<Tensor>]) -> Result<VarMap> {
+pub(super) fn set_map(vars: &VarMap, set: &[Option<Tensor>]) -> Result<VarMap> {
     let mut out = VarMap::new();
     for (n, t) in vars.names().iter().zip(set) {
         if let Some(t) = t {
@@ -143,12 +143,12 @@ fn state(kind: &str, vars: &VarMap, sets: &[VarMap], t: u64) -> Result<String> {
     Ok(crate::hash::sha256_hex(text.as_bytes()))
 }
 
-fn io<E: std::fmt::Display>(what: &Path) -> impl FnOnce(E) -> NnError + '_ {
+pub(super) fn io<E: std::fmt::Display>(what: &Path) -> impl FnOnce(E) -> NnError + '_ {
     move |e| NnError::Dist(format!("{}: {e}", what.display()))
 }
 
 /// Write `bytes` to `path` durably (a temporary file, synced, then renamed).
-fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
+pub(super) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     use std::io::Write;
     let tmp = path.with_extension("tmp");
     let mut f = std::fs::File::create(&tmp).map_err(io(&tmp))?;

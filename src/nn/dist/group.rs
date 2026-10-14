@@ -618,7 +618,7 @@ impl ProcessGroup {
     /// on every rank.
     pub fn all_reduce_f32(&mut self, x: &[f32]) -> Result<Vec<f32>> {
         let layout = format!("an f32 vector of {}", x.len());
-        let (mut acc, _) = self.chain(&[x.len()], &layout, vec![vec![Some(x.to_vec())]], 1)?;
+        let (mut acc, _) = self.chain(&[x.len()], &layout, vec![vec![Some(x.to_vec())]], 1, None)?;
         Ok(acc.pop().flatten().unwrap_or_default())
     }
 
@@ -635,14 +635,49 @@ impl ProcessGroup {
         let sizes: Vec<usize> = sum.slots().iter().map(|s| s.numel()).collect();
         let layout = sum.layout().to_string();
         let (parts, count) = sum.take_parts();
-        let (acc, total) = self.chain(&sizes, &layout, parts, count)?;
+        let (acc, total) = self.chain(&sizes, &layout, parts, count, None)?;
         sum.set_folded(acc, total);
         Ok(())
     }
 
+    /// The reduce-scatter of `sum`: the same fold as `all_reduce_grads` (the global micro-steps
+    /// in flat (rank, micro-step) order, passed along the ranks in rank order), after which each
+    /// rank receives only its own pieces of the total. `pieces[q]` lists rank q's pieces as
+    /// (var, first element, end) in row-major order; every rank passes the same list. Returns this
+    /// rank's pieces in its order (None: a var no micro-step on any rank used) and the count of
+    /// every rank's micro-steps. Each element of a piece holds the bits the all-reduce gives it.
+    pub(crate) fn reduce_scatter_grads(&mut self, sum: &mut GradSum, pieces: &[Vec<(usize, usize, usize)>]) -> Result<(Vec<Option<Vec<f32>>>, usize)> {
+        if self.rank() > 0 && !sum.is_deferred() && sum.count() > 1 {
+            return Err(NnError::Dist(format!(
+                "rank {}: {} micro-steps were pre-added; a rank after the first must keep them apart (ProcessGroup::grad_sum)",
+                self.rank(),
+                sum.count()
+            )));
+        }
+        if pieces.len() != self.world_size() {
+            return Err(NnError::Dist(format!("pieces for {} ranks in a world of {}", pieces.len(), self.world_size())));
+        }
+        let sizes: Vec<usize> = sum.slots().iter().map(|s| s.numel()).collect();
+        if let Some(&(v, lo, hi)) = pieces.iter().flatten().find(|(v, lo, hi)| *v >= sizes.len() || lo > hi || *hi > sizes[*v]) {
+            return Err(NnError::Dist(format!("a piece ({v}, {lo}..{hi}) outside the vars")));
+        }
+        // The pieces enter the layout both sides check, so an all-reduce never meets a
+        // reduce-scatter, nor two reduce-scatters with other pieces.
+        let mut text = String::new();
+        for p in pieces {
+            text.push_str(&format!("{p:?};"));
+        }
+        let layout = format!("{} reduce-scatter {}", sum.layout(), crate::hash::sha256_hex(text.as_bytes()));
+        let (parts, count) = sum.take_parts();
+        let (mine, total) = self.chain(&sizes, &layout, parts, count, Some(pieces))?;
+        sum.set_folded(vec![None; sizes.len()], total);
+        Ok((mine, total))
+    }
+
     /// The rank-ordered fold of every rank's `parts` (vars of `sizes` elements); returns the
-    /// total and the total count on every rank.
-    fn chain(&mut self, sizes: &[usize], layout: &str, parts: Vec<Part>, count: usize) -> Result<(Part, usize)> {
+    /// total and the total count on every rank. With `scatter`, each rank gets only its own pieces
+    /// of the total (one entry per piece of `scatter[rank]`), in place of the whole total.
+    fn chain(&mut self, sizes: &[usize], layout: &str, parts: Vec<Part>, count: usize, scatter: Option<&[Vec<(usize, usize, usize)>]>) -> Result<(Part, usize)> {
         let (r, w) = (self.rank(), self.world_size());
         let n = sizes.len();
         if let Some(p) = parts.iter().find(|p| p.len() != n || p.iter().zip(sizes).any(|(v, s)| v.as_ref().is_some_and(|v| v.len() != *s))) {
@@ -654,7 +689,10 @@ impl ProcessGroup {
                 fold(&mut acc, p, i > 0);
             }
             if w == 1 {
-                return Ok((acc, count));
+                return Ok(match scatter {
+                    None => (acc, count),
+                    Some(pieces) => (cut(&acc, &pieces[0]), count),
+                });
             }
             let seq = self.next_seq();
             let plan = plan(sizes, self.opts.chunk_elems);
@@ -666,7 +704,10 @@ impl ProcessGroup {
                 wire::send(self.peer(1), Op::ReduceChunk, 0, seq, &msg)?;
             }
             drop(acc);
-            return self.recv_result(seq, sizes, &plan);
+            return match scatter {
+                None => self.recv_result(seq, sizes, &plan),
+                Some(pieces) => self.recv_pieces(seq, &pieces[0]),
+            };
         }
         let seq = self.next_seq();
         let plan = plan(sizes, self.opts.chunk_elems);
@@ -711,10 +752,32 @@ impl ProcessGroup {
             }
         }
         if !last {
-            return self.recv_result(seq, sizes, &plan);
+            return match scatter {
+                None => self.recv_result(seq, sizes, &plan),
+                Some(pieces) => self.recv_pieces(seq, &pieces[r]),
+            };
         }
         // The last rank holds the total: send it to every other rank, in rank order, once it has
         // all of it (so no rank is still sending while it waits for the result).
+        if let Some(pieces) = scatter {
+            // Reduce-scatter: each rank gets its own pieces only.
+            for (q, own) in pieces.iter().enumerate().take(w - 1) {
+                let mut e = Enc::default();
+                e.u64(total_count as u64).u64(own.len() as u64);
+                for &(v, lo, hi) in own {
+                    match &total[v] {
+                        Some(x) => {
+                            e.u8(1).f32s(&x[lo..hi]);
+                        }
+                        None => {
+                            e.u8(0);
+                        }
+                    }
+                }
+                wire::send(self.peer(q), Op::ScatterResult, r, seq, &e.0)?;
+            }
+            return Ok((cut(&total, &pieces[r]), total_count));
+        }
         let mut e = Enc::default();
         e.u64(total_count as u64).u64(plan.len() as u64);
         let meta = e.0;
@@ -749,6 +812,32 @@ impl ProcessGroup {
         }
         Ok((total, count))
     }
+
+    /// This rank's pieces of a reduce-scatter's total, from the last rank.
+    fn recv_pieces(&mut self, seq: u64, own: &[(usize, usize, usize)]) -> Result<(Part, usize)> {
+        let (r, last) = (self.rank(), self.world_size() - 1);
+        let payload = wire::recv(self.peer(last), Op::ScatterResult, r, last, seq)?;
+        let mut d = Dec::new(&payload);
+        let (count, n) = (d.u64()? as usize, d.u64()? as usize);
+        if n != own.len() {
+            return Err(NnError::Dist(format!("rank {r}: {n} pieces from the reduce-scatter, {} expected", own.len())));
+        }
+        let mut out = Vec::with_capacity(n);
+        for &(_, lo, hi) in own {
+            out.push(match d.u8()? {
+                0 => None,
+                1 => Some(d.f32s(hi - lo)?),
+                b => return Err(NnError::Dist(format!("reduce-scatter result: presence byte {b}"))),
+            });
+        }
+        d.done()?;
+        Ok((out, count))
+    }
+}
+
+/// The pieces `own` of a whole total (None where the var has no sum).
+fn cut(total: &Part, own: &[(usize, usize, usize)]) -> Part {
+    own.iter().map(|&(v, lo, hi)| total[v].as_ref().map(|x| x[lo..hi].to_vec())).collect()
 }
 
 #[cfg(test)]
