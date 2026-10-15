@@ -1,8 +1,8 @@
 # Changes
 
-## Unreleased
+## 0.6.1
 
-Documentation only; no code changed. The 0.6.0 release's deterministic mode, with every 0.6.0 option off, was tested on two GPUs in one machine and on two machines:
+Released 16 October 2026. Documentation only; no code changed. The 0.6.0 release's deterministic mode, with every 0.6.0 option off, was tested on two GPUs in one machine and on two machines:
 
 Tested on rented cloud machines, with each setup's key in `doc/distributed.md` ("Two GPUs in one machine, and two machines"):
 - 2 L4 GPUs in one machine (driver 580.126.09): data-parallel with one rank per GPU (world size 2) and two ranks per GPU (world size 4), and sharded (stages 1–3, world size 2), equal to one GPU with accumulation;
