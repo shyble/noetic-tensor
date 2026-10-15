@@ -1,6 +1,6 @@
-# Mixed precision (not released)
+# Mixed precision (released in 0.6.0)
 
-Status: built; tested on one machine per GPU kind (CUDA: an RTX 4060 Laptop GPU on Windows, bf16 products; Metal: an Apple GPU of the Apple7 family on macOS, f16 products; up to two processes sharing the GPU; shown: one process, two-rank data parallelism and two-rank sharded training (stage 2) each run twice with every per-step weight hash the same, each resumed from a checkpoint in a new launch with every per-step hash the uninterrupted run's, the per-step loss within the stated tolerance of f32's over 12 steps, the mixed key apart from f32's in both distributed modes, and with every option off the 0.5.0 results unchanged); multi-GPU, multi-machine and datacenter runs untested. Mixed-precision results are their own kind: never compared byte for byte with, or pooled with, f32 results.
+Status: built; tested on one machine per GPU kind (CUDA: an RTX 4060 Laptop GPU on Windows, bf16 products; Metal: an Apple GPU of the Apple7 family on macOS, f16 products; up to two processes sharing the GPU; shown: one process, two-rank data parallelism and two-rank sharded training (stage 2) each run twice with every per-step weight hash the same, each resumed from a checkpoint in a new launch with every per-step hash the uninterrupted run's, the per-step loss within a tolerance of f32's over 12 steps (set with the measurement), the mixed key apart from f32's in both distributed modes, and with every option off the 0.5.0 results unchanged); multi-GPU, multi-machine and datacenter runs untested. Mixed-precision results are their own kind: never compared byte for byte with, or pooled with, f32 results.
 
 ## What it is
 
@@ -34,9 +34,9 @@ for step in 0..steps {
 - **Refused:** a mixed step on a group made at f32 (its key would not say so); a data-parallel or sharded step taken while the thread's precision differs from the group's (`check_precision`, for every step, mixed or not); a job whose ranks multiply at different precisions (another platform key at the rendezvous, before step 0); a resume of a mixed checkpoint at f32, and the other way round (the checkpoint holds the group key).
 - **The loss scale** is part of the run's configuration: put it in the job key (as `ddp_gate` does for a scale other than 2^0) so that a resume under another scale is refused.
 
-## Why the deterministic mode's identity still holds
+## The deterministic mode's identity, as far as shown
 
-Within a mixed key, W ranks with k micro-steps each give one process's weights with W·k, bit for bit, as in f32: each micro-step's gradient is computed by the same kernels on the same inputs on every rank, the sum is `GradSum`'s flat rank order, the scale and unscale are exact, and the skip decision is the same everywhere. Sharded training gives data parallelism's bits likewise. The gates below show it on both GPUs; it is an identity within the mixed key, never a comparison with f32.
+Shown on CUDA and Metal (the gate's model, 12 steps): within the mixed key, two-rank data parallelism with one micro-step per rank and two-rank sharded training (stage 2, flat) gave the weights of one process with two micro-steps, bit for bit. Other world sizes, micro-step splits, stages and partitions under mixed precision are untested. The reasons the identity is expected (each micro-step's gradient computed by the same kernels on the same inputs on every rank, `GradSum`'s flat rank order, an exact scale and unscale, the same skip decision everywhere) are not a showing. It is an identity within the mixed key, never a comparison with f32.
 
 ## The gates (`doc/gates/e3/`; logs in `doc/gates/e3/logs/`)
 
@@ -58,11 +58,11 @@ The gate's model and data (a decoder of width 32, 2 blocks, MLP 64, 4 heads, con
 
 Library tests (`nn::dist::tests::mixed_tests`, ranks as threads on the GPU; CUDA and Metal; logs `win-cuda-tests.log`, `mac-metal-tests.log`): W 2 data-parallel and sharded (stage 2) equal one process for 6 steps; a scaled backward pass that overflows f32 (the loss times 1e30 under a scale of 2^60) skips every step on both ranks, data-parallel and sharded, leaving the vars' initial bits, while a scale of 2^8 steps; a job mixing precisions, and a step at another precision than the group's, are refused; the loss scale's round trip is exact on values across the normal range and the finiteness check finds an infinity or a NaN anywhere.
 
-### Gate 3: the loss against f32 (a stated tolerance, not an identity)
+### Gate 3: the loss against f32 (a tolerance set with the measurement, not an identity)
 
 One process, M = 4, 200 steps; the per-step mean loss over the 4 micro-steps (the masked cross-entropy summed over the 2 models' answer positions).
 
-**The stated tolerance:** over the first 12 steps, the mixed run's per-step loss is within 2e-2 of f32's on bf16 and within 2e-3 on f16 (absolute; the loss starts near 6.6). Measured:
+**The tolerance, set with the measurement:** over the first 12 steps, the mixed run's per-step loss was within 8.04e-3 of f32's on bf16 and within 1.74e-3 on f16 (absolute; the loss starts near 6.6); the tolerances 2e-2 (bf16) and 2e-3 (f16) were set from this measurement, not fixed in advance. Measured:
 
 | | Largest difference, steps 1–12 | Mean loss by window (steps 1–12 / 13–50 / 51–100 / 101–150 / 151–200) | Skipped steps |
 |---|---|---|---|

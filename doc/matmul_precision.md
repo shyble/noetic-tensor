@@ -1,4 +1,4 @@
-# Reduced-precision matrix products on the GPU (not released)
+# Reduced-precision matrix products on the GPU (released in 0.6.0)
 
 Status: built; tested on one machine per GPU kind (CUDA: an RTX 4060 Laptop GPU, compute capability 8.9, on Windows; Metal: an Apple GPU of the Apple7 family on macOS; shown: every product within the stated tolerance on fixed shapes, a training run repeated in a new process and resumed from a checkpoint in a new process with every per-step weight hash the same, the key apart from f32's, and with the option off the 0.5.0 results unchanged); multi-GPU, multi-machine and datacenter runs untested. Its results are its own kind: they are never compared byte for byte with, or pooled with, f32 results.
 
@@ -73,6 +73,8 @@ Both train to the same loss level; over many steps the trajectories drift apart 
 
 ### Wall time (a measurement on these machines only)
 
+The baseline is the engine's own deterministic f32 kernels (CUDA: compiled with `--fmad=false`, one explicit fmaf per k in order; Metal: safe math mode), not cuBLAS or any other vendor library; the ratios below are not a comparison with vendor libraries.
+
 The library's throughput test (`half_matmul_throughput`, ignored by default; median of 21 runs, 7 for the largest; resident operands, synchronised):
 
 | Product | CUDA f32 | CUDA bf16 | Metal f32 | Metal f16 |
@@ -101,5 +103,5 @@ The option-off checks on Windows ran on the first commit of this change (the lat
 
 ## Untested and not built
 
-- Untested: other GPUs (CUDA's kernel needs compute capability 8.0; Metal's was run on the Apple7 family only), multi-GPU and multi-machine runs, the product inside a data-parallel or sharded job (keyed, but not run), long training at scale.
-- Not built: bf16 on Metal; f16 or tf32 on CUDA; 16-bit tensors as operands without a cast; tiles chosen by shape; split over k; cuBLAS; mixed precision with f32 master weights and loss scaling (the next step builds on this product).
+- Untested: other GPUs (CUDA's kernel needs compute capability 8.0; Metal's was run on the Apple7 family only), multi-GPU and multi-machine runs, long training at scale. Inside data-parallel and sharded jobs the product was run by mixed precision (`doc/mixed_precision.md`: two ranks, data-parallel and sharded stage 2); other configurations there are untested.
+- Not built: bf16 on Metal; f16 or tf32 on CUDA; 16-bit tensors as operands without a cast; tiles chosen by shape; split over k; cuBLAS. (Mixed precision with f32 master weights and a loss scale is built on this product in the same release: `doc/mixed_precision.md`.)
