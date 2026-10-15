@@ -41,6 +41,13 @@ extern "C" __global__ void __launch_bounds__(128) hgemm_bf16_f32acc(const float*
     const int wm = (warp >> 1) * 32, wn = (warp & 1) * 32;
     const int g = lane >> 2, q = lane & 3;
     const uint row0 = blockIdx.y * HM, col0 = blockIdx.x * HN;
+    // Four-value loads need a row-contiguous operand whose rows start 16-byte aligned.
+    const bool a_vec = p.a_cs == 1 && p.a_rs % 4 == 0 && offs[2 * z] % 4 == 0 && ((ulong)A & 15) == 0;
+    const bool b_vec = p.b_cs == 1 && p.b_rs % 4 == 0 && offs[2 * z + 1] % 4 == 0 && ((ulong)B & 15) == 0;
+    // Transposed views (the backward pass's Aᵀ and Bᵀ): contiguous along m for A, along k for B.
+    const bool a_col = p.a_rs == 1 && p.a_cs != 1, b_col = p.b_rs == 1 && p.b_cs != 1;
+    const bool a_colv = a_col && p.a_cs % 4 == 0 && offs[2 * z] % 4 == 0 && ((ulong)A & 15) == 0;
+    const bool b_colv = b_col && p.b_cs % 4 == 0 && offs[2 * z + 1] % 4 == 0 && ((ulong)B & 15) == 0;
     float acc[2][4][4];
     #pragma unroll
     for (int i = 0; i < 2; i++)
@@ -49,21 +56,71 @@ extern "C" __global__ void __launch_bounds__(128) hgemm_bf16_f32acc(const float*
             #pragma unroll
             for (int r = 0; r < 4; r++) acc[i][j][r] = 0.0f;
     for (uint k0 = 0; k0 < p.k; k0 += HK) {
-        #pragma unroll 4
-        for (int l = 0; l < 16; l++) {
-            int e = t + 128 * l;
-            int r = e / HK, kk = e % HK;
-            uint gr = row0 + r, gk = k0 + kk;
-            float v = (gr < p.m && gk < p.k) ? a[(ulong)gr * p.a_rs + (ulong)gk * p.a_cs] : 0.0f;
-            As[r][kk] = bf16_rne(v);
+        // Interior tiles of operands contiguous (and 16-byte aligned) along the read axis load four
+        // values at a time; edges and strided views load one at a time. Both store the same bf16
+        // values.
+        if (a_vec && row0 + HM <= p.m && k0 + HK <= p.k) {
+            #pragma unroll
+            for (int l = 0; l < 4; l++) {
+                int e = t + 128 * l;
+                int r = e / (HK / 4), kk = (e % (HK / 4)) * 4;
+                float4 v = *(const float4*)(a + (ulong)(row0 + r) * p.a_rs + k0 + kk);
+                uint lo = (uint)bf16_rne(v.x) | ((uint)bf16_rne(v.y) << 16), hi = (uint)bf16_rne(v.z) | ((uint)bf16_rne(v.w) << 16);
+                *(uint2*)&As[r][kk] = make_uint2(lo, hi);
+            }
+        } else if (a_colv && row0 + HM <= p.m && k0 + HK <= p.k) {
+            #pragma unroll
+            for (int l = 0; l < 4; l++) {
+                int e = t + 128 * l;
+                int kk = e / (HM / 4), r = (e % (HM / 4)) * 4;
+                float4 v = *(const float4*)(a + row0 + r + (ulong)(k0 + kk) * p.a_cs);
+                As[r][kk] = bf16_rne(v.x);
+                As[r + 1][kk] = bf16_rne(v.y);
+                As[r + 2][kk] = bf16_rne(v.z);
+                As[r + 3][kk] = bf16_rne(v.w);
+            }
+        } else {
+            // One at a time, consecutive threads along whichever axis of A is contiguous.
+            #pragma unroll 4
+            for (int l = 0; l < 16; l++) {
+                int e = t + 128 * l;
+                int r, kk;
+                if (a_col) { kk = e / HM; r = e % HM; } else { r = e / HK; kk = e % HK; }
+                uint gr = row0 + r, gk = k0 + kk;
+                float v = (gr < p.m && gk < p.k) ? a[(ulong)gr * p.a_rs + (ulong)gk * p.a_cs] : 0.0f;
+                As[r][kk] = bf16_rne(v);
+            }
         }
-        #pragma unroll 4
-        for (int l = 0; l < 16; l++) {
-            int e = t + 128 * l;
-            int kk = e / HN, nn = e % HN;
-            uint gk = k0 + kk, gn = col0 + nn;
-            float v = (gk < p.k && gn < p.n) ? b[(ulong)gk * p.b_rs + (ulong)gn * p.b_cs] : 0.0f;
-            Bs[nn][kk] = bf16_rne(v);
+        if (b_vec && col0 + HN <= p.n && k0 + HK <= p.k) {
+            #pragma unroll
+            for (int l = 0; l < 4; l++) {
+                int e = t + 128 * l;
+                int kk = e / (HN / 4), nn = (e % (HN / 4)) * 4;
+                float4 v = *(const float4*)(b + (ulong)(k0 + kk) * p.b_rs + col0 + nn);
+                Bs[nn][kk] = bf16_rne(v.x);
+                Bs[nn + 1][kk] = bf16_rne(v.y);
+                Bs[nn + 2][kk] = bf16_rne(v.z);
+                Bs[nn + 3][kk] = bf16_rne(v.w);
+            }
+        } else if (b_colv && col0 + HN <= p.n && k0 + HK <= p.k) {
+            #pragma unroll
+            for (int l = 0; l < 4; l++) {
+                int e = t + 128 * l;
+                int nn = e / (HK / 4), kk = (e % (HK / 4)) * 4;
+                float4 v = *(const float4*)(b + k0 + kk + (ulong)(col0 + nn) * p.b_cs);
+                uint lo = (uint)bf16_rne(v.x) | ((uint)bf16_rne(v.y) << 16), hi = (uint)bf16_rne(v.z) | ((uint)bf16_rne(v.w) << 16);
+                *(uint2*)&Bs[nn][kk] = make_uint2(lo, hi);
+            }
+        } else {
+            #pragma unroll 4
+            for (int l = 0; l < 16; l++) {
+                int e = t + 128 * l;
+                int kk, nn;
+                if (b_col) { nn = e / HK; kk = e % HK; } else { kk = e / HN; nn = e % HN; }
+                uint gk = k0 + kk, gn = col0 + nn;
+                float v = (gk < p.k && gn < p.n) ? b[(ulong)gk * p.b_rs + (ulong)gn * p.b_cs] : 0.0f;
+                Bs[nn][kk] = bf16_rne(v);
+            }
         }
         __syncthreads();
         #pragma unroll

@@ -38,7 +38,7 @@ say() { echo "$*" >> "$log"; }
 } > "$log"
 G() { name=$1; shift; $prio "$E/half_gemm_gate" --device "$device" --out "$work/$name" "$@" > "$work/$name.out" 2>&1; }
 fin() { head -1 "$work/$1/final.txt"; }
-key() { sed -n 's/.* key \(.*\)$/\1/p' "$work/$1.out" | head -1 | sed 's/kernels-[0-9a-f]*/kernels-<hex>/g'; }
+key() { sed -n 's/.* key \(.*\)$/\1/p' "$work/$1.out" | head -1 | sed 's/kernels-[0-9a-f]*/kernels-<hex>/g; s/metal-Apple_[A-Za-z0-9_]*-mathmode/metal-<the GPU name>-mathmode/'; }
 
 say "## 1. Run to run (200 steps, two processes)"
 G a --precision half --steps 200 && G b --precision half --steps 200 || { say "runs: FAILED"; fail=1; }
@@ -67,10 +67,10 @@ mean() { awk -v lo="$2" -v hi="$3" '$2 >= lo && $2 <= hi { s += $3; n++ } END { 
 say "mean loss over steps 1-10: f32 $(mean "$work/f/losses" 1 10), half $(mean "$work/a/losses" 1 10); over steps 191-200: f32 $(mean "$work/f/losses" 191 200), half $(mean "$work/a/losses" 191 200)"
 awk 'NR == FNR { a[$2] = $3; next } ($2 in a) && ($2 == 1 || $2 % 40 == 0) { printf "  step %3d: f32 %.6f half %.6f difference %+.3e\n", $2, a[$2], $3, $3 - a[$2] }' "$work/f/losses" "$work/a/losses" >> "$log"
 
-say "## 5. Wall time of training (width 512, 4 blocks, MLP 2048, batch 64, 10 steps; 3 runs each, in rotation; background priority)"
+say "## 5. Wall time of training (width 512, 4 blocks, MLP 2048, batch 64, 10 steps, no per-step hash; 3 runs each, in rotation; background priority)"
 for rep in 1 2 3; do
   for p in f32 half; do
-    G "t-$p-$rep" --precision "$p" --steps 10 --width 512 --blocks 4 --mlp 2048 --batch 64 --lr 0.001 || { say "timing $p $rep: FAILED"; fail=1; continue; }
+    G "t-$p-$rep" --precision "$p" --steps 10 --width 512 --blocks 4 --mlp 2048 --batch 64 --lr 0.001 --no-hash || { say "timing $p $rep: FAILED"; fail=1; continue; }
     say "$p run $rep: $(sed -n 's/^wall \([0-9.]*\) seconds.*/\1/p' "$work/t-$p-$rep.out") s"
   done
 done

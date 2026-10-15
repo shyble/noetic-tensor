@@ -1,5 +1,16 @@
 # Changes
 
+## Unreleased
+
+**Reduced-precision matrix products on the GPU** (`tensor::MatmulPrecision::Half`, opt-in; not released): built; tested on one machine per GPU kind (CUDA: an RTX 4060 Laptop GPU on Windows; Metal: an Apple GPU of the Apple7 family on macOS; shown: every product within the stated tolerance on fixed shapes, a training run repeated in a new process and resumed from a checkpoint in a new process with every per-step weight hash the same, the key apart from f32's, and with the option off the 0.5.0 results unchanged); multi-GPU, multi-machine and datacenter runs untested. Its results are never compared byte for byte with, or pooled with, f32 results. See `doc/matmul_precision.md`.
+
+- **What it does.** Both operands of a GPU matrix product are rounded to a 16-bit float as they are loaded, and the products accumulate in f32: bf16 on CUDA's tensor cores (`mma.sync.m16n8k16`, compute capability 8.0 or later), f16 on Metal's simdgroup 8×8 matrices. One kernel per backend (64×64 tiles, k in steps of 32 in order, no split over k, no atomics), each its own source compiled on first use.
+- **The option.** `set_matmul_precision` (per thread; `F32` by default) or `Tensor::matmul_with` for one product; a product's backward pass takes its precision; CPU tensors stay f32.
+- **Its own key.** While the precision is `Half`, `gpu_platform_key` ends with the product's part (`-gemm-bf16-mma.m16n8k16-f32acc-tile64x64x32-kernels-<hex>` on CUDA, `-gemm-f16-simdgroup8x8-f32acc-tile64x64x32-kernels-<hex>` on Metal), so process groups and checkpoints key such runs apart; with `F32` every key is 0.5.0's.
+- **Measured** (the stated tolerance, asserted by the tests): on eight fixed shapes the largest error is at most 3.6e-7 of Σ|a·b| against the exact product of the rounded operands, and within the operands' rounding against the f32 operands (largest 3.45e-3 for bf16, 4.6e-4 for f16). Throughput on these machines: 2.0–3.9× the f32 kernel on the RTX 4060 Laptop GPU (up to 14.3 TFLOP/s), 1.2–1.8× on the Apple GPU (up to 1.6 TFLOP/s); a training step of a 16.8M-parameter decoder 0.83× (CUDA) and 0.91× (Metal) of the f32 step's time.
+- **API** (additions): `MatmulPrecision`, `set_matmul_precision`, `matmul_precision`, `half_gemm_key`, `Tensor::matmul_with`; the example `half_gemm_gate`.
+- **Not built:** bf16 on Metal, 16-bit tensors as operands without a cast, tiles chosen by shape, cuBLAS, mixed precision with master weights and loss scaling.
+
 ## 0.5.0
 
 **Sharded data parallelism** (`nn::dist::ShardedDataParallel`, deterministic mode only; released 15 October 2026): built; tested on one machine per device kind (the CPU reference backend on macOS aarch64 at world sizes 1 and 2 and on Windows x86_64 at 1, 2 and 4; CUDA with up to four processes sharing a single CUDA GPU on Windows; Metal with two processes sharing one Apple GPU on macOS; shown: byte-identical weights and per-step hashes to data parallelism at every stage and partition, with absent gradients, an idle weight under AdamW's decay and clipping, consolidated checkpoints byte-identical to data parallelism's, and a killed run resumed from a sharded checkpoint equal to the uninterrupted run); multi-GPU, multi-machine and datacenter runs untested. See "Sharded data parallelism" in `doc/distributed.md`.

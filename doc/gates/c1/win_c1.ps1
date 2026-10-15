@@ -11,6 +11,11 @@
 # doc\gates\c1\logs\win-cuda-half.log (gate 2) and win-cuda-off.log (gate 1).
 param([string]$Part = 'gate', [string]$Ref = '')
 $ErrorActionPreference = 'Continue'
+# UTF-8 throughout: the native executables' output is read, and the logs written, as UTF-8 (the logs
+# hold Σ, × and ᵀ).
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+$PSDefaultParameterValues['*:Encoding'] = 'utf8'
 $me = [System.Diagnostics.Process]::GetCurrentProcess()
 $me.ProcessorAffinity = [IntPtr]3
 $me.PriorityClass = 'BelowNormal'
@@ -74,11 +79,11 @@ if ($Part -eq 'gate') {
     Say "mean loss over steps 1-10: f32 $(Mean $x 1 10), half $(Mean $y 1 10); over steps 191-200: f32 $(Mean $x 191 200), half $(Mean $y 191 200)"
     foreach ($k in @(1, 40, 80, 120, 160, 200)) { Say ("  step {0,3}: f32 {1:f6} half {2:f6} difference {3:e3}" -f $k, $x[$k], $y[$k], ($y[$k] - $x[$k])) }
 
-    Say '## 5. Wall time of training (width 512, 4 blocks, MLP 2048, batch 64, 10 steps; 3 runs each, in rotation)'
+    Say '## 5. Wall time of training (width 512, 4 blocks, MLP 2048, batch 64, 10 steps, no per-step hash; 3 runs each, in rotation)'
     $times = @{ 'f32' = @(); 'half' = @() }
     foreach ($rep in 1..3) {
         foreach ($p in @('f32', 'half')) {
-            if (G "t-$p-$rep" @('--precision', $p, '--steps', '10', '--width', '512', '--blocks', '4', '--mlp', '2048', '--batch', '64', '--lr', '0.001')) {
+            if (G "t-$p-$rep" @('--precision', $p, '--steps', '10', '--width', '512', '--blocks', '4', '--mlp', '2048', '--batch', '64', '--lr', '0.001', '--no-hash')) {
                 $w = [double]((Get-Content "$work\t-$p-$rep.out" | Where-Object { $_ -like 'wall *' }) -replace '^wall ([0-9.]+) seconds.*', '$1')
                 $times[$p] += $w
                 Say "$p run $rep : $w s"
@@ -89,7 +94,11 @@ if ($Part -eq 'gate') {
     Say "parameters per model: $((Get-Content "$work\t-half-1.out" | Select-Object -First 1) -replace '^half_gemm_gate: (\d+) parameters.*', '$1')"
 
     Say '## library tests and throughput (the lib test binary: half_matmul, ignored included)'
-    $lib = (Select-String -Path "$root\Cargo.toml" -Pattern '^name = "(.+)"' | Select-Object -Last 1).Matches[0].Groups[1].Value
+    # The library's test binary: the newest <lib name>-*.exe in target\release\deps, the lib name
+    # read from Cargo.toml's [lib] section.
+    $toml = Get-Content "$root\Cargo.toml"
+    $at = [array]::IndexOf($toml, '[lib]')
+    $lib = ($toml[($at + 1)..($toml.Count - 1)] | Where-Object { $_ -match '^name = "(.+)"' } | Select-Object -First 1) -replace '^name = "(.+)"', '$1'
     $exe = (Get-ChildItem "$root\target\release\deps\$lib-*.exe" | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
     $out = & $exe 'half_matmul' --include-ignored --test-threads=1 --nocapture 2>&1 | ForEach-Object { "$_" }
     if ($LASTEXITCODE -ne 0) { $script:fail = 1 }

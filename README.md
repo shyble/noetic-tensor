@@ -62,6 +62,7 @@ assert_eq!(loss.shape(), &[4]);
 - Float, int and bool tensors: F32, F64, F16 and BF16 storage (16-bit types compute in f32), I64, I32 and U8.
 - Views (reshape, swap_dims, slice, expand), broadcasting, batched matmul, reductions, indexing, gather (with a scatter-add backward), sort, argmax.
 - A tape-based reverse-mode autodiff.
+- Not released: reduced-precision matrix products on the GPU (`MatmulPrecision::Half`, opt-in: bf16 operands on CUDA's tensor cores, f16 on Metal's simdgroup matrices, f32 accumulation; its own key, never compared byte for byte with f32; built; tested on one machine per GPU kind; multi-GPU, multi-machine and datacenter runs untested). See `doc/matmul_precision.md`.
 - A panicking API and a fallible `try_*` counterpart for every check.
 - Devices:
   - `Cpu(Reference)`: deterministic reference kernels.

@@ -46,6 +46,8 @@ kernel void hgemm_f16_f32acc(device const float* A [[buffer(0)]],
     const uint row0 = tg.y * HM, col0 = tg.x * HN;
     const uint wm = (sg >> 1) * 32, wn = (sg & 1) * 32;
     const bool a_vec = p.a_cs == 1, b_vec = p.b_cs == 1;
+    // Transposed views (the backward pass's Aᵀ and Bᵀ): contiguous along m for A, along k for B.
+    const bool a_col = p.a_rs == 1 && p.a_cs != 1, b_col = p.b_rs == 1 && p.b_cs != 1;
     simdgroup_float8x8 acc[4][4];
     for (uint i = 0; i < 4; ++i)
         for (uint j = 0; j < 4; ++j) acc[i][j] = make_filled_simdgroup_matrix<float, 8, 8>(0.0f);
@@ -58,11 +60,22 @@ kernel void hgemm_f16_f32acc(device const float* A [[buffer(0)]],
                 float4 v = float4(*(device const packed_float4*)(a + (ulong)(row0 + r) * p.a_rs + k0 + kk));
                 *(threadgroup half4*)(As + r * HK + kk) = half4(v);
             }
+        } else if (a_col && row0 + HM <= p.m && k0 + HK <= p.k) {
+            for (uint e = lid; e < HM * HK / 4; e += 128) {
+                uint kk = e / (HM / 4), r = (e % (HM / 4)) * 4;
+                float4 v = float4(*(device const packed_float4*)(a + row0 + r + (ulong)(k0 + kk) * p.a_cs));
+                As[r * HK + kk] = half(v.x);
+                As[(r + 1) * HK + kk] = half(v.y);
+                As[(r + 2) * HK + kk] = half(v.z);
+                As[(r + 3) * HK + kk] = half(v.w);
+            }
         } else {
+            // One at a time, consecutive threads along whichever axis of A is contiguous.
             for (uint e = lid; e < HM * HK; e += 128) {
-                uint r = e / HK, kk = e % HK;
+                uint r, kk;
+                if (a_col) { kk = e / HM; r = e % HM; } else { r = e / HK; kk = e % HK; }
                 uint gr = row0 + r, gk = k0 + kk;
-                As[e] = half((gr < p.m && gk < p.k) ? a[(ulong)gr * p.a_rs + (ulong)gk * p.a_cs] : 0.0f);
+                As[r * HK + kk] = half((gr < p.m && gk < p.k) ? a[(ulong)gr * p.a_rs + (ulong)gk * p.a_cs] : 0.0f);
             }
         }
         if (b_vec && col0 + HN <= p.n && k0 + HK <= p.k) {
@@ -71,11 +84,21 @@ kernel void hgemm_f16_f32acc(device const float* A [[buffer(0)]],
                 float4 v = float4(*(device const packed_float4*)(b + (ulong)(k0 + kk) * p.b_rs + col0 + cc));
                 *(threadgroup half4*)(Bs + kk * HN + cc) = half4(v);
             }
+        } else if (b_col && col0 + HN <= p.n && k0 + HK <= p.k) {
+            for (uint e = lid; e < HK * HN / 4; e += 128) {
+                uint cc = e / (HK / 4), kk = (e % (HK / 4)) * 4;
+                float4 v = float4(*(device const packed_float4*)(b + k0 + kk + (ulong)(col0 + cc) * p.b_cs));
+                Bs[kk * HN + cc] = half(v.x);
+                Bs[(kk + 1) * HN + cc] = half(v.y);
+                Bs[(kk + 2) * HN + cc] = half(v.z);
+                Bs[(kk + 3) * HN + cc] = half(v.w);
+            }
         } else {
             for (uint e = lid; e < HK * HN; e += 128) {
-                uint kk = e / HN, cc = e % HN;
+                uint kk, cc;
+                if (b_col) { cc = e / HK; kk = e % HK; } else { kk = e / HN; cc = e % HN; }
                 uint gk = k0 + kk, gc = col0 + cc;
-                Bs[e] = half((gk < p.k && gc < p.n) ? b[(ulong)gk * p.b_rs + (ulong)gc * p.b_cs] : 0.0f);
+                Bs[kk * HN + cc] = half((gk < p.k && gc < p.n) ? b[(ulong)gk * p.b_rs + (ulong)gc * p.b_cs] : 0.0f);
             }
         }
         threadgroup_barrier(mem_flags::mem_threadgroup);

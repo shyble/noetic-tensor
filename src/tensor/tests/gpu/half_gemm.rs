@@ -179,17 +179,20 @@ fn half_matmul_tolerance_repeat_and_key() {
 #[test]
 #[ignore]
 fn half_matmul_throughput() {
-    let shapes: [(&str, [usize; 4]); 6] = [
+    let shapes: [(&str, [usize; 4]); 8] = [
         ("1024³", [1, 1024, 1024, 1024]),
         ("2048³", [1, 2048, 2048, 2048]),
         ("4096³", [1, 4096, 4096, 4096]),
         ("512×512×2048", [1, 512, 512, 2048]),
         ("batched 32 × 256×64×256", [32, 256, 64, 256]),
         ("768×3072 × 4096 rows", [1, 4096, 768, 3072]),
+        ("Aᵀ·B 512×512×2048", [1, 512, 512, 2048]),
+        ("A·Bᵀ 512×2048×512", [1, 512, 2048, 512]),
     ];
     for (name, [nb, m, k, n]) in shapes {
-        let a = ht(&[nb, m, k], 1).to(M);
-        let b = ht(&[nb, k, n], 2).to(M);
+        // Transposed operands are views of a contiguous transpose, as in the backward pass.
+        let a = if name.starts_with("Aᵀ") { ht(&[nb, k, m], 1).to(M).swap_dims(1, 2) } else { ht(&[nb, m, k], 1).to(M) };
+        let b = if name.contains("Bᵀ") { ht(&[nb, n, k], 2).to(M).swap_dims(1, 2) } else { ht(&[nb, k, n], 2).to(M) };
         let mut line = format!("{TAG} matmul throughput {name}:");
         for p in [MatmulPrecision::F32, MatmulPrecision::Half] {
             for _ in 0..3 {

@@ -22,7 +22,8 @@
 //!
 //! Options (defaults in brackets): `--device cuda|metal|cpu` [cuda]; `--precision f32|half`
 //! [half]; `--steps N` [200]; `--width D` [32]; `--blocks L` [2]; `--mlp F` [64]; `--batch B` [2];
-//! `--lr X` [0.01]; `--out DIR`; `--ckpt-every E`; `--ckpt-dir D` [DIR/ckpt]; `--resume`.
+//! `--lr X` [0.01]; `--out DIR`; `--ckpt-every E`; `--ckpt-dir D` [DIR/ckpt]; `--resume`;
+//! `--no-hash` (timing: no per-step hash, the final weights' hash only).
 
 use noetic::nn::dist::{state_hash, Checkpoint, GroupOptions, ProcessGroup};
 use noetic::nn::{masked_cross_entropy, Adam, AdamConfig, Decoder, DecoderConfig, ForwardOptions, Optimizer, ParamGroups, VarMap};
@@ -71,10 +72,11 @@ struct Args {
     ckpt_every: u64,
     ckpt_dir: Option<PathBuf>,
     resume: bool,
+    no_hash: bool,
 }
 
 fn args() -> Result<Args, String> {
-    let mut a = Args { device: "cuda".into(), precision: "half".into(), steps: 200, width: 32, blocks: 2, mlp: 64, batch: 2, lr: 1e-2, out: None, ckpt_every: 0, ckpt_dir: None, resume: false };
+    let mut a = Args { device: "cuda".into(), precision: "half".into(), steps: 200, width: 32, blocks: 2, mlp: 64, batch: 2, lr: 1e-2, out: None, ckpt_every: 0, ckpt_dir: None, resume: false, no_hash: false };
     let mut it = std::env::args().skip(1);
     let num = |v: Option<String>, k: &str| -> Result<u64, String> { v.ok_or(format!("{k} needs a value"))?.parse().map_err(|_| format!("{k}: not a number")) };
     while let Some(k) = it.next() {
@@ -91,6 +93,7 @@ fn args() -> Result<Args, String> {
             "--ckpt-every" => a.ckpt_every = num(it.next(), &k)?,
             "--ckpt-dir" => a.ckpt_dir = Some(it.next().ok_or("--ckpt-dir needs a value")?.into()),
             "--resume" => a.resume = true,
+            "--no-hash" => a.no_hash = true,
             other => return Err(format!("unknown option {other:?} (see the file's header)")),
         }
     }
@@ -171,7 +174,9 @@ fn main() -> noetic::Result<()> {
         let lv = loss.to_vec_f64()[0];
         let grads = loss.backward();
         opt.step(&mut vars, lifted.grads(&grads), 1.0);
-        let h = state_hash(&vars)?;
+        // The per-step hash serialises every var to the host (with --no-hash, for timing, only the
+        // final weights are hashed, after the loop's wall time is taken).
+        let h = if a.no_hash { String::from("-") } else { state_hash(&vars)? };
         println!("step {} {h}", step + 1);
         println!("loss {} {lv:.9e}", step + 1);
         if let Some(f) = &mut steps_log {
@@ -185,6 +190,7 @@ fn main() -> noetic::Result<()> {
             Checkpoint::save(&mut group, dir, step + 1, step + 1, &vars, &opt)?;
         }
     }
+    noetic::tensor::synchronize(device).or_else(|e| if matches!(device, Device::Cpu(_)) { Ok(()) } else { Err(e) })?;
     let wall = started.elapsed().as_secs_f64();
     let fin = state_hash(&vars)?;
     println!("final weights sha256 {fin}");
