@@ -1,5 +1,5 @@
-# E2 single-device differential, mac-cpu: the reference 0.4.0 (its release tag) against this tree (HEAD), device cpu
-# rustc 1.94.1; Darwin arm64; 2026-10-14T22:48:15Z
+# E2 single-device differential, mac-cpu: the reference 0.4.0 (its release tag) against the working tree (the release candidate, before its commit), device cpu
+# rustc 1.94.1; Darwin arm64; 2026-10-15T02:20:54Z
 ## reference
 decoder adamw: vars 46d89e84ed8cf9e7e55adb7d1eeed4e2f5ee851cdc0338775b0925dfbc430580 logits a3b092204f61a199db73222e78cc344ba26e5246ecd139aa86bfd4a1fc65d19b losses ae20179296d7c856229369141d8aee8a5b67a79eef7d612736a02b24fa105899
 decoder sgd: vars 1d63b3936701be80247ae4aab6b6d6d3197ccaa86ed3e852bc7ea81be7e18418 logits f3c4065f38f71a49bd16c3af2126369357561b3a30d2827130dd4dca010707dc losses 985fb5281e84c666a29d3ce55ac6da6f822045ed34243365c17b437705e58e7e
