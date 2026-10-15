@@ -4,7 +4,7 @@
 //! - Refusals: a mixed step on a group made at f32; on a GPU, a step at another precision than the
 //!   group was made at; a job whose ranks multiply at different precisions (another key).
 //! - On a GPU (ranks as threads): W 2 in the deterministic mode gives one process's bits within the
-//!   mixed key, data-parallel and sharded; a loss scale that overflows skips the step on every rank
+//!   mixed key, data-parallel and sharded; a scaled backward pass that overflows skips the step on every rank
 //!   and leaves the vars alone; the mixed key differs from f32's.
 
 use super::*;
@@ -59,6 +59,12 @@ mod gpu {
     /// its group is made) with `k` micro-steps each, mixed precision with `scale`, data-parallel or
     /// sharded (stage 2, flat); per rank, the per-step hashes, whether each step stepped, the key.
     fn run(w: usize, k: usize, steps: u64, scale: LossScale, sharded: bool) -> Vec<(Vec<String>, Vec<bool>, String)> {
+        run_with(w, k, steps, scale, sharded, 1.0)
+    }
+
+    /// `run`, each micro-step's loss multiplied by `boost` (a huge boost with a large scale makes
+    /// the scaled backward pass overflow f32 on any GPU).
+    fn run_with(w: usize, k: usize, steps: u64, scale: LossScale, sharded: bool, boost: f64) -> Vec<(Vec<String>, Vec<bool>, String)> {
         let port = free_port().unwrap();
         let hs: Vec<_> = (0..w)
             .map(|r| {
@@ -76,7 +82,10 @@ mod gpu {
                     let mut adam = adam;
                     let mut sdp = sharded.then(|| ShardedDataParallel::new(&mut g, vars.clone(), crate::nn::ParamGroups::new(&vars), ShardOptions::new(ShardStage::Gradients), |v, gr| Adam::new(AdamConfig { lr: 1e-2, ..AdamConfig::default() }, gr, v)).unwrap());
                     for step in 0..steps {
-                        let f = |l: &VarMap, i: usize| gate_micro(&cfg, l, &shard.batch(step, i), step, shard.global_micro(i) as u64, micro, false);
+                        let f = |l: &VarMap, i: usize| {
+                            let loss = gate_micro(&cfg, l, &shard.batch(step, i), step, shard.global_micro(i) as u64, micro, false);
+                            if boost == 1.0 { loss } else { loss.mul_scalar(boost) }
+                        };
                         let s = match &mut sdp {
                             None => mixed_data_parallel_step(&mut g, &mut vars, &mut adam, k, Reduce::Mean, 1.0, scale, f).unwrap(),
                             Some(z) => {
@@ -113,12 +122,13 @@ mod gpu {
     #[test]
     fn gpu_mixed_overflow_skips_the_step_on_every_rank() {
         let _guard = procs();
-        // A loss scale of 2^60 overflows the scaled backward pass: every step is skipped, on both
+        // The loss times 1e30 under a loss scale of 2^60 overflows f32 in the scaled backward pass
+        // (bf16 has f32's range, so the scale alone would not): every step is skipped, on both
         // ranks, and the vars keep their initial bits.
         let (vars, _) = gate_state_on(false, None, dev());
         let initial = state_hash(&vars).unwrap();
         for sharded in [false, true] {
-            let res = run(2, 1, 3, LossScale::power_of_two(60).unwrap(), sharded);
+            let res = run_with(2, 1, 3, LossScale::power_of_two(60).unwrap(), sharded, 1e30);
             for r in &res {
                 assert_eq!(r.1, vec![false; 3], "sharded {sharded}");
                 assert!(r.0.iter().all(|h| *h == initial), "sharded {sharded}");

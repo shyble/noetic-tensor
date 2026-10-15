@@ -24,6 +24,7 @@ Released in 0.3.0 (9 October 2026) for the CPU. Released in 0.4.0 (10 October 20
 | `examples/ddp_copy_task.rs` | The copy task trained data-parallel; the same weights at 1, 2 and 4 processes. |
 | `ShardedDataParallel`, `ShardOptions`, `ShardGrads`, `ShardLayout` | Since 0.5.0. Sharded data parallelism in the shape of ZeRO's stages and FSDP, with the weights of data parallelism bit for bit; consolidated and sharded checkpoints (see "Sharded data parallelism"). |
 | `examples/ddp_gate.rs` | Since 0.5.0. The gates' training as an example binary, one device per rank from `LOCAL_RANK` (see "The gate as an example binary"). |
+| `mixed_data_parallel_step`, `mixed_data_parallel_grads`, `mixed_sharded_step`, `MixedStep`, `mixed_record`, `ProcessGroup::matmul_precision` | Not released. Mixed precision: the products at `MatmulPrecision::Half`, f32 vars and optimizer state, a static loss scale (`nn::LossScale`); in either mode, data-parallel or sharded; its own key (see `doc/mixed_precision.md`). |
 | `DistMode`, `FastOptions`, `GroupOptions::with_mode`, `ProcessGroup::mode`, `is_fast`, `require_deterministic` | Not released. The fast mode: per-rank sums, gradient buckets, a ring all-reduce (a ring reduce-scatter for sharding) and communication overlapped with the backward pass; its own key; not reproducible bit for bit (see "Fast mode"). |
 
 A training loop:
@@ -383,6 +384,10 @@ Status: built; tested on one machine per device kind (the CPU reference backend 
 On this machine and load the fast mode's medians are within 3% of the deterministic mode's, inside the runs' spread: the measurement shows no difference between the modes here, either way. Both two-rank runs took longer than one process: the two ranks ran on the two efficiency cores of a loaded machine. These numbers say nothing about other machines, real networks or GPUs, where the share of communication differs.
 
 **With the mode off, nothing changes** (gate 1; `doc/gates/e4/run_gates.sh`, `ddp_gate_refs.sh`, `single_device_diff.sh`): the `nn::dist` tests pass on the Mac (59, the runs needing more than 2 processes at once skipped); `examples/ddp_gate.rs`'s 26 reference and two-rank results (the gate, clipping, SGD, absent and idle configurations at M 2 and 4, a resume, two launchers as nodes) print 0.5.0's final weights line for line on the CPU (`9a24f95f50da08572824c0561890ea3213cc5076274b0cfaffe3bc6abba851d6` at M 2, `02ead67c808b59bde6852388e13d48a89c257b22a8080b95549bc780f2cf1a78` at M 4) and on Metal; the six single-device configurations and the copy-task example print the same bytes built from 0.5.0 and from this change, on the CPU and on Metal; the sharding gates (every stage and partition equal to data parallelism) pass among the `nn::dist` tests. The deterministic gates were not rerun on Windows, nor at W 4 on the Mac.
+
+## Mixed precision (not released)
+
+See `doc/mixed_precision.md`. A group made while the thread's matmul precision is `Half` records it, and its key's device part names the reduced-precision product, in either mode; every data-parallel or sharded step checks that the thread multiplies at the group's precision. The mixed steps scale the loss by a static power of two, scale the summed gradients (or a rank's pieces) back, and skip the optimizer step on every rank when a gradient on any rank is not finite. Within a mixed key the deterministic mode's identities hold (W ranks with k micro-steps equal one process with W·k; sharding equals data parallelism), shown on CUDA and Metal; never compared with f32.
 
 ## Single-device behaviour is unchanged
 
