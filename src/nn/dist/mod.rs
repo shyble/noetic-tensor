@@ -21,8 +21,13 @@
 //! (`device_key`), so CPU and GPU runs never share one. Tested on one machine per GPU kind, with
 //! several processes on one GPU; multi-GPU and multi-machine runs are untested.
 //!
-//! A fast mode (backend-native reduction order, overlap) may come later; it will carry its own
-//! key and is never mixed with this one.
+//! **Fast mode** (`DistMode::Fast`, opt-in through `GroupOptions::mode`): per-rank sums, gradient
+//! buckets, a ring all-reduce (a ring reduce-scatter for sharded training) and communication
+//! overlapped with the backward pass of each rank's last micro-step. Its key says `mode=fast`
+//! with the world size and the buckets, its record says "fast mode, not reproducible bit for
+//! bit", and it is never pooled with or compared byte for byte against this mode: a job mixing
+//! modes is refused at the rendezvous, and `ProcessGroup::require_deterministic` refuses it
+//! wherever a caller needs the deterministic mode.
 //!
 //! The environment is torchrun's: `MASTER_ADDR`, `MASTER_PORT`, `RANK`, `WORLD_SIZE`,
 //! `LOCAL_RANK`, `LOCAL_WORLD_SIZE`, `GROUP_RANK` (the node). Without `RANK` and `WORLD_SIZE`
@@ -33,6 +38,7 @@ mod auth;
 mod checkpoint;
 mod ddp;
 mod env;
+mod fast;
 mod group;
 mod launch;
 mod reduce;
@@ -47,6 +53,7 @@ pub use auth::JobSecret;
 pub use checkpoint::{Checkpoint, CheckpointMeta, CheckpointOptimizer, CHECKPOINT_FORMAT};
 pub use ddp::{check_in_sync, data_parallel_grads, data_parallel_step, state_hash};
 pub use env::{device_key, platform_key, DeviceKind, DistEnv};
+pub use fast::{DistMode, FastOptions};
 pub use group::{wire_version, GroupOptions, ProcessGroup, WIRE_PROTOCOL};
 pub use launch::{free_port, run, spawn, Job, LaunchConfig};
 pub use reduce::{GradSum, Reduce};

@@ -1907,3 +1907,6 @@ fn group_options_are_built_with_a_builder() {
 
 #[path = "zero_tests.rs"]
 mod zero_tests;
+
+#[path = "fast_tests.rs"]
+mod fast_tests;
