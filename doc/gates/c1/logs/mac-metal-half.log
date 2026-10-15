@@ -1,0 +1,53 @@
+# C1 gate 2 (the reduced-precision product), mac-metal: device metal
+# rustc 1.94.1; Darwin arm64; 2026-10-15T08:34:12Z
+# half results are compared with f32 by a tolerance, never byte for byte
+## 1. Run to run (200 steps, two processes)
+half, run A and run B: final weights sha256 d206005f238b8d76c49af6da694a92c7b6ae8c53b45a8f1c4f149380c3ff63eb and d206005f238b8d76c49af6da694a92c7b6ae8c53b45a8f1c4f149380c3ff63eb; every per-step weight hash the same (200 steps)
+key: metal-<the GPU name>-mathmode-safe-kernels-<hex>-family-apple7-metal4-mac2-arch-applegpu_g13s-macos-Version_27.0.1__Build_26A434_-gemm-f16-simdgroup8x8-f32acc-tile64x64x32-kernels-<hex>
+## 2. Restart
+half, 107 steps with checkpoints every 50, a new process resuming from step 100 to 200: final weights sha256 d206005f238b8d76c49af6da694a92c7b6ae8c53b45a8f1c4f149380c3ff63eb; every per-step hash the uninterrupted run's
+f32 resume of the half checkpoint: refused (another platform or device: resume refused)
+## 3. A larger decoder, run twice (width 256, 4 blocks, MLP 1024, batch 32, 20 steps)
+half: final weights sha256 9eef90f8a0d2a2281f07ad95e12cf496a4938ed4c3ddcb2f6193f92fe30c10e5; every per-step hash the same
+## 4. The loss against f32 (the 200 steps of 1)
+half against f32: largest |loss difference| 2.608e-01 at step 155 (relative 2.926e+00) over 200 steps; over steps 1-10 1.681e-03
+mean loss over steps 1-10: f32 6.5381, half 6.5386; over steps 191-200: f32 0.0154, half 0.0165
+  step   1: f32 6.167694 half 6.167397 difference -2.966e-04
+  step  40: f32 4.790024 half 4.791563 difference +1.539e-03
+  step  80: f32 0.368768 half 0.374896 difference +6.128e-03
+  step 120: f32 0.239633 half 0.258019 difference +1.839e-02
+  step 160: f32 0.024120 half 0.027519 difference +3.398e-03
+  step 200: f32 0.022854 half 0.027341 difference +4.487e-03
+## 5. Wall time of training (width 512, 4 blocks, MLP 2048, batch 64, 10 steps, no per-step hash; 3 runs each, in rotation; background priority)
+f32 run 1: 1.498 s
+half run 1: 1.360 s
+f32 run 2: 1.554 s
+half run 2: 1.371 s
+f32 run 3: 1.502 s
+half run 3: 1.324 s
+f32: median 1.502 s
+half: median 1.360 s
+parameters per model: 16802304
+## library tests and throughput (cargo test --features metal --lib half_matmul -- --include-ignored)
+metal half matmul [1,256,256]x[1,256,256] (f16, k 256): largest error / Σ|a||b|: 1.922e-7 against the rounded operands' product (bound 1.221e-4), 9.646e-5 against the f32 operands' (bound 1.099e-3); the f32 path's 2.524e-7
+metal half matmul [1,512,512]x[1,512,512] (f16, k 512): largest error / Σ|a||b|: 2.806e-7 against the rounded operands' product (bound 2.441e-4), 7.471e-5 against the f32 operands' (bound 1.221e-3); the f32 path's 1.355e-7
+metal half matmul [1,64,2048]x[1,2048,64] long k (f16, k 2048): largest error / Σ|a||b|: 2.248e-7 against the rounded operands' product (bound 9.766e-4), 2.545e-5 against the f32 operands' (bound 1.953e-3); the f32 path's 3.937e-8
+metal half matmul [1,7,5]x[1,5,3] tiny (f16, k 5): largest error / Σ|a||b|: 7.543e-8 against the rounded operands' product (bound 2.384e-6), 4.623e-4 against the f32 operands' (bound 9.789e-4); the f32 path's 4.248e-8
+metal half matmul [2,130,300]x[2,300,257] ragged (f16, k 300): largest error / Σ|a||b|: 2.433e-7 against the rounded operands' product (bound 1.431e-4), 8.422e-5 against the f32 operands' (bound 1.120e-3); the f32 path's 2.451e-7
+metal half matmul [3,100,96]x[1,96,70] broadcast (f16, k 96): largest error / Σ|a||b|: 1.796e-7 against the rounded operands' product (bound 4.578e-5), 1.519e-4 against the f32 operands' (bound 1.022e-3); the f32 path's 1.969e-7
+metal half matmul Aᵀ·Bᵀ views [2,150,300],[2,260,150] (f16, k 150): largest error / Σ|a||b|: 2.363e-7 against the rounded operands' product (bound 7.153e-5), 1.242e-4 against the f32 operands' (bound 1.048e-3); the f32 path's 2.228e-7
+metal half matmul key part: gemm-f16-simdgroup8x8-f32acc-tile64x64x32
+metal half matmul: 8 products and 2 gradients the same bits twice
+metal matmul throughput 2048³: f32 17.473 ms (983 GFLOP/s); half 11.712 ms (1467 GFLOP/s);
+metal matmul throughput 4096³: f32 134.411 ms (1023 GFLOP/s); half 102.407 ms (1342 GFLOP/s);
+metal matmul throughput 512×512×2048: f32 1.493 ms (719 GFLOP/s); half 0.943 ms (1138 GFLOP/s);
+metal matmul throughput 768×3072 × 4096 rows: f32 18.954 ms (1020 GFLOP/s); half 12.222 ms (1581 GFLOP/s);
+metal matmul throughput A·Bᵀ 512×2048×512: f32 2.488 ms (432 GFLOP/s); half 1.421 ms (756 GFLOP/s);
+metal matmul throughput Aᵀ·B 512×512×2048: f32 1.486 ms (722 GFLOP/s); half 1.004 ms (1070 GFLOP/s);
+metal matmul throughput batched 32 × 256×64×256: f32 0.536 ms (501 GFLOP/s); half 0.434 ms (619 GFLOP/s);
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 207 filtered out; finished in 25.94s
+test tensor::tests::gpu::metal::half_gemm::body_half_matmul_error_against_f32_on_fixed_shapes metal half matmul [1,64,64]x[1,64,64] (f16, k 64): largest error / Σ|a||b|: 1.527e-7 against the rounded operands' product (bound 3.052e-5), 1.822e-4 against the f32 operands' (bound 1.007e-3); the f32 path's 1.710e-7
+test tensor::tests::gpu::metal::half_gemm::body_half_matmul_is_run_to_run_identical metal half matmul: 8 products and 2 gradients the same bits twice
+test tensor::tests::gpu::metal::half_gemm::half_matmul_throughput metal matmul throughput 1024³: f32 2.498 ms (860 GFLOP/s); half 1.701 ms (1262 GFLOP/s);
+test tensor::tests::gpu::metal::half_gemm::half_matmul_tolerance_repeat_and_key metal half matmul [1,64,64]x[1,64,64] (f16, k 64): largest error / Σ|a||b|: 1.527e-7 against the rounded operands' product (bound 3.052e-5), 1.822e-4 against the f32 operands' (bound 1.007e-3); the f32 path's 1.710e-7
+# ended 2026-10-15T08:37:12Z, all checks passed

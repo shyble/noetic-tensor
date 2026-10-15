@@ -1,0 +1,36 @@
+# C1 gate 1: the Metal GPU tests (f32 kernels bit-exact against CpuRef, keys, the backward pass) and the half tests; rustc 1.94.1; Darwin arm64; 2026-10-15T08:39:12Z
+test tensor::tests::gpu::metal::backward::backward_against_cpu_ref ... ok
+test tensor::tests::gpu::metal::backward::body_backward_twice_byte_identical ... ignored, run by its wrapper in a fresh process
+test tensor::tests::gpu::metal::backward::body_exact_gradients_bit_for_bit ... ignored, run by its wrapper in a fresh process
+test tensor::tests::gpu::metal::backward::body_transcendental_gradients_within_1e4 ... ignored, run by its wrapper in a fresh process
+test tensor::tests::gpu::metal::backward::body_transfers_are_on_the_tape ... ignored, run by its wrapper in a fresh process
+test tensor::tests::gpu::metal::half_gemm::body_half_matmul_error_against_f32_on_fixed_shapes ... ignored, run by its wrapper in a fresh process
+test tensor::tests::gpu::metal::half_gemm::body_half_matmul_is_run_to_run_identical ... ignored, run by its wrapper in a fresh process
+test tensor::tests::gpu::metal::half_gemm::body_half_precision_is_keyed_and_off_by_default ... ignored, run by its wrapper in a fresh process
+test tensor::tests::gpu::metal::half_gemm::half_matmul_throughput ... ignored
+test tensor::tests::gpu::metal::half_gemm::half_matmul_tolerance_repeat_and_key ... ok
+test tensor::tests::gpu::metal::kernels::body_device_sort_matches_cpu_ref ... ignored, run by its wrapper in a fresh process
+test tensor::tests::gpu::metal::kernels::body_device_sort_ties_views_and_topk_gradient ... ignored, run by its wrapper in a fresh process
+test tensor::tests::gpu::metal::kernels::body_fused_adam_matches_cpu_ref_bit_for_bit ... ignored, run by its wrapper in a fresh process
+test tensor::tests::gpu::metal::kernels::body_matmul_large_tiles_and_split_k_bit_exact ... ignored, run by its wrapper in a fresh process
+test tensor::tests::gpu::metal::kernels::matmul_throughput ... ignored
+test tensor::tests::gpu::metal::kernels::sort_adam_and_matmul_against_cpu_ref ... ok
+test tensor::tests::gpu::metal::only::body_tuned_matmul_bit_exact ... ignored, run by its wrapper in a fresh process
+test tensor::tests::gpu::metal::only::metal_matmul_variants_against_cpu_ref ... ok
+test tensor::tests::gpu::metal::only::metal_perf_cpu_ref_tie_order ... ignored
+test tensor::tests::gpu::metal::only::metal_perf_matmul_bench ... ignored
+test tensor::tests::gpu::metal::only::raw_latency ... ignored
+test tensor::tests::gpu::metal::ops::body_deterministic_twice ... ignored, run by its wrapper in a fresh process
+test tensor::tests::gpu::metal::ops::body_exact_ops_match_cpu_ref_bit_for_bit ... ignored, run by its wrapper in a fresh process
+test tensor::tests::gpu::metal::ops::body_matmul_bit_exact_past_one_k_block ... ignored, run by its wrapper in a fresh process
+test tensor::tests::gpu::metal::ops::body_nan_max_argmax_and_stable_sort_match_cpu_ref ... ignored, run by its wrapper in a fresh process
+test tensor::tests::gpu::metal::ops::body_sort_and_topk_on_the_device ... ignored, run by its wrapper in a fresh process
+test tensor::tests::gpu::metal::ops::body_transcendentals_within_4_ulp ... ignored, run by its wrapper in a fresh process
+test tensor::tests::gpu::metal::ops::body_transfers_and_errors ... ignored, run by its wrapper in a fresh process
+test tensor::tests::gpu::metal::ops::ops_against_cpu_ref ... ok
+test tensor::tests::gpu::metal::ops::pinned_body ... ignored, run by its wrapper in a fresh process
+test tensor::tests::gpu::metal::ops::the_reference_pin_refuses_the_gpu_without_initialising_it ... ok
+test tensor::tests::gpu::metal::raw::body_tiled_sgemm_within_bound ... ignored, run by its wrapper in a fresh process
+test tensor::tests::gpu::metal::raw::body_vector_add_is_bit_exact ... ignored, run by its wrapper in a fresh process
+test tensor::tests::gpu::metal::raw::raw_parity ... ok
+test result: ok. 7 passed; 0 failed; 27 ignored; 0 measured; 177 filtered out; finished in 3.80s
