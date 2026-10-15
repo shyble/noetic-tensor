@@ -1,0 +1,34 @@
+# E3 gates 2 and 3 (mixed precision), mac-metal: device metal, ranks sharing the device, at most 2 processes at once
+# rustc 1.94.1; Darwin arm64; 2026-10-15T09:30:24Z
+# mixed results are compared with f32 by a tolerance, never byte for byte
+## Gate 2: run to run and restart, per key (12 steps, M 2)
+one (W 1): final weights sha256 05801ed7a2c10db982eb9e33cdbb04cea3395fc2db74bfbea2c306746813704c; run twice, every per-step hash and the final weights the same: yes
+one: 7 steps with checkpoints every 3, a new launch resuming from step 6 to 12: every per-step hash and the final weights the uninterrupted run's: yes
+ddp (W 2): final weights sha256 05801ed7a2c10db982eb9e33cdbb04cea3395fc2db74bfbea2c306746813704c; run twice, every per-step hash and the final weights the same: yes
+ddp: 7 steps with checkpoints every 3, a new launch resuming from step 6 to 12: every per-step hash and the final weights the uninterrupted run's: yes
+zero (W 2, --zero 2:flat): final weights sha256 05801ed7a2c10db982eb9e33cdbb04cea3395fc2db74bfbea2c306746813704c; run twice, every per-step hash and the final weights the same: yes
+zero: 7 steps with checkpoints every 3, a new launch resuming from step 6 to 12: every per-step hash and the final weights the uninterrupted run's: yes
+W 2 data-parallel against one process (the deterministic mode's identity within the mixed key): yes
+W 2 sharded (stage 2, flat) against W 2 data-parallel: yes
+key and record (one process): mode=deterministic order=flat-rank backend=tcp platform=macos-aarch64-neon-rustc_1.94.1-matrixmultiply-0.3.11 libm=<sha256> device=metal-<the GPU name>-mathmode-safe-kernels-<hex>-family-apple7-metal4-mac2-arch-applegpu_g13s-macos-Version_27.0.1__Build_26A434_-gemm-f16-simdgroup8x8-f32acc-tile64x64x32-kernels-<hex> world=1 auth=none weight_checks=13 ok last_weights=05801ed7a2c10db982eb9e33cdbb04cea3395fc2db74bfbea2c306746813704c matmul=half loss-scale=2^0
+key and record (sharded): mode=deterministic order=flat-rank backend=tcp platform=macos-aarch64-neon-rustc_1.94.1-matrixmultiply-0.3.11 libm=<sha256> device=metal-<the GPU name>-mathmode-safe-kernels-<hex>-family-apple7-metal4-mac2-arch-applegpu_g13s-macos-Version_27.0.1__Build_26A434_-gemm-f16-simdgroup8x8-f32acc-tile64x64x32-kernels-<hex> world=2 auth=hmac-sha256 weight_checks=13 ok last_weights=05801ed7a2c10db982eb9e33cdbb04cea3395fc2db74bfbea2c306746813704c sharding=stage-2-gradients partition=flat matmul=half loss-scale=2^0
+fast mode, W 2, M 4, run twice: the same per-step hashes: yes (an observation; the fast mode makes no such promise); key: mode=fast order=ring world=2 bucket=26214400 overlap=on backend=tcp platform=macos-aarch64-neon-rustc_1.94.1-matrixmultiply-0.3.11 libm=<sha256> device=metal-<the GPU name>-mathmode-safe-kernels-<hex>-family-apple7-metal4-mac2-arch-applegpu_g13s-macos-Version_27.0.1__Build_26A434_-gemm-f16-simdgroup8x8-f32acc-tile64x64x32-kernels-<hex> world=2 auth=hmac-sha256 weight_checks=13 ok last_weights=72a0345f258fc75d9a403f8c0259354c94c89cdd0197052a8548156683ef7230 (fast mode, not reproducible bit for bit) matmul=half loss-scale=2^0
+f32 resume of the mixed checkpoint: refused ((another platform or device: resume refused))
+a job with rank 0 mixed and rank 1 at f32 (the same job key): refused on both ranks before step 0
+## Gate 3: the loss against f32 (one process, M 4, 200 steps)
+mixed-long against f32: steps 1-12 largest |difference| 1.741e-03 at step 12 (relative 6.551e-04); steps 1-200 largest |difference| 7.116e-01 at step 185 (relative 3.665e+01); skipped steps 0
+mixed8-long against f32: steps 1-12 largest |difference| 1.179e-03 at step 12 (relative 4.434e-04); steps 1-200 largest |difference| 3.959e-01 at step 200 (relative 2.099e+01); skipped steps 0
+mean loss, steps 1-10: f32 4.47826, mixed 2^0 4.47813, mixed 2^8 4.47823; steps 191-200: f32 0.07577, mixed 2^0 0.17814, mixed 2^8 0.10065
+mean loss by window, f32-long: steps 1-12 4.20073, 13-50 0.67086, 51-100 0.12088, 101-150 0.07988, 151-200 0.07348
+mean loss by window, mixed-long: steps 1-12 4.20081, 13-50 0.67099, 51-100 0.10575, 101-150 0.06941, 151-200 0.15854
+mean loss by window, mixed8-long: steps 1-12 4.20086, 13-50 0.67099, 51-100 0.11741, 101-150 0.09075, 151-200 0.08960
+  step   1: f32 6.551885 mixed 2^0 6.551809 mixed 2^8 6.551809
+  step  25: f32 0.716114 mixed 2^0 0.717039 mixed 2^8 0.717248
+  step  50: f32 0.168519 mixed 2^0 0.170039 mixed 2^8 0.168046
+  step  75: f32 0.181287 mixed 2^0 0.077643 mixed 2^8 0.150754
+  step 100: f32 0.197900 mixed 2^0 0.151445 mixed 2^8 0.159343
+  step 125: f32 0.015691 mixed 2^0 0.012996 mixed 2^8 0.028462
+  step 150: f32 0.039178 mixed 2^0 0.157579 mixed 2^8 0.063722
+  step 175: f32 0.031087 mixed 2^0 0.312129 mixed 2^8 0.021541
+  step 200: f32 0.095774 mixed 2^0 0.686250 mixed 2^8 0.491686
+# ended 2026-10-15T09:31:31Z, all checks passed
