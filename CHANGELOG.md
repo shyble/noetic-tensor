@@ -1,5 +1,17 @@
 # Changes
 
+## Unreleased
+
+Documentation only; no code changed. The 0.6.0 release's deterministic mode, with every 0.6.0 option off, was tested on more than one GPU and more than one machine:
+
+Tested on rented cloud machines, with its key in `doc/distributed.md` ("Two GPUs in one machine, and two machines"):
+- 2 ranks on 2 L4 GPUs in one machine, data-parallel (world sizes 2 and 4) and sharded (stages 1–3), equal to one GPU with accumulation;
+- 2 machines with one L4 each over a private network, data-parallel on the CPU (world sizes 2 and 4) and on the GPU (world size 2), equal to one machine.
+
+Drivers 580.126.09 and 595.91.07. Deterministic path only. Untested: more than 2 GPUs or 2 machines, other GPU models and drivers, NCCL, and the fast mode, half-precision products and mixed precision on these machines.
+
+Shown on both: byte-identical final weights and per-step hashes against one GPU (or one machine) with accumulation, a killed rank resumed from a checkpoint, and refusals before step 0. Sharding was tested on two GPUs in one machine only. `Cuda(1)` gave `Cuda(0)`'s results bit for bit. The engine's own tests passed on both machines' CPU and CUDA backends, the tests of the 0.6.0 options skipped by name.
+
 ## 0.6.0
 
 Released 15 October 2026. Three opt-in features, each off by default and each under its own key: a fast mode for data-parallel and sharded training, reduced-precision matrix products on the GPU, and mixed precision. Each is built; tested on one machine per device kind; multi-GPU, multi-machine and datacenter runs untested. The fast mode is not reproducible bit for bit. Fast, half-precision and mixed-precision results are never compared byte for byte with, or pooled with, f32 or deterministic-mode results. With every option off, the 0.5.0 results are unchanged (the gates' weights, the single-device configurations' bytes, on the CPU, CUDA and Metal).
