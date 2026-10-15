@@ -1,0 +1,36 @@
+# examples/ddp_gate.rs references, mac-cpu: device cpu, ranks sharing the device, at most 2 processes at once
+# rustc 1.94.1; Darwin arm64; 2026-10-14T22:37:33Z
+gate M 2 reference (1 process, 2 accumulation micro-steps): final weights sha256 9a24f95f50da08572824c0561890ea3213cc5076274b0cfaffe3bc6abba851d6
+gate M 2 W 2 (2 ranks sharing the device): final weights sha256 9a24f95f50da08572824c0561890ea3213cc5076274b0cfaffe3bc6abba851d6; every per-step hash and the final weights equal the reference: yes
+gate M 4 reference (1 process, 4 accumulation micro-steps): final weights sha256 02ead67c808b59bde6852388e13d48a89c257b22a8080b95549bc780f2cf1a78
+gate M 4 W 2 (2 ranks sharing the device): final weights sha256 02ead67c808b59bde6852388e13d48a89c257b22a8080b95549bc780f2cf1a78; every per-step hash and the final weights equal the reference: yes
+gate M 4 W 4: SKIPPED (4 processes at once, at most 2)
+absent M 2 reference (1 process, 2 accumulation micro-steps): final weights sha256 ad6123c3d8b63ef377a5a170e5ccb9fee8f0231149de96d1b541dbcc030c302d
+absent M 2 W 2 (2 ranks sharing the device): final weights sha256 ad6123c3d8b63ef377a5a170e5ccb9fee8f0231149de96d1b541dbcc030c302d; every per-step hash and the final weights equal the reference: yes
+absent M 4 reference (1 process, 4 accumulation micro-steps): final weights sha256 ece0f094e6cda5b32da95963735ccd59533fcdda35dfc58321a197deec392a14
+absent M 4 W 2 (2 ranks sharing the device): final weights sha256 ece0f094e6cda5b32da95963735ccd59533fcdda35dfc58321a197deec392a14; every per-step hash and the final weights equal the reference: yes
+absent M 4 W 4: SKIPPED (4 processes at once, at most 2)
+idle-after M 2 reference (1 process, 2 accumulation micro-steps): final weights sha256 f9bbdf2ac3769e419f5eee41b9479aa6edfff6cffb2b59b8a2ab4b2013b59292
+idle-after M 2 W 2 (2 ranks sharing the device): final weights sha256 f9bbdf2ac3769e419f5eee41b9479aa6edfff6cffb2b59b8a2ab4b2013b59292; every per-step hash and the final weights equal the reference: yes
+idle-after M 4 reference (1 process, 4 accumulation micro-steps): final weights sha256 f22326df4bbff1f8a33f8062c08f05c26d63e878f4b69213d8e700551e8deaf2
+idle-after M 4 W 2 (2 ranks sharing the device): final weights sha256 f22326df4bbff1f8a33f8062c08f05c26d63e878f4b69213d8e700551e8deaf2; every per-step hash and the final weights equal the reference: yes
+idle-after M 4 W 4: SKIPPED (4 processes at once, at most 2)
+idle-torch M 2 reference (1 process, 2 accumulation micro-steps): final weights sha256 2a8040b1464089c93726dda5bfacfb7c186ccc8ebec5dbd7b235e6c4deaf221b
+idle-torch M 2 W 2 (2 ranks sharing the device): final weights sha256 2a8040b1464089c93726dda5bfacfb7c186ccc8ebec5dbd7b235e6c4deaf221b; every per-step hash and the final weights equal the reference: yes
+idle-torch M 4 reference (1 process, 4 accumulation micro-steps): final weights sha256 920cac4bb6c2f5a319549bb5fd33dc34a3dc01af85bae8980896aed83ebe98e4
+idle-torch M 4 W 2 (2 ranks sharing the device): final weights sha256 920cac4bb6c2f5a319549bb5fd33dc34a3dc01af85bae8980896aed83ebe98e4; every per-step hash and the final weights equal the reference: yes
+idle-torch M 4 W 4: SKIPPED (4 processes at once, at most 2)
+clip M 2 reference (1 process, 2 accumulation micro-steps): final weights sha256 382d20b6b7c970187cabb9909918c78cc7d4a23695de51d9d1c846fddacb99c0
+clip M 2 W 2 (2 ranks sharing the device): final weights sha256 382d20b6b7c970187cabb9909918c78cc7d4a23695de51d9d1c846fddacb99c0; every per-step hash and the final weights equal the reference: yes
+clip M 4 reference (1 process, 4 accumulation micro-steps): final weights sha256 5d4fa2a91c75d1803519b3674cd7acf231568b7e461ca71064fa0d1180f936b2
+clip M 4 W 2 (2 ranks sharing the device): final weights sha256 5d4fa2a91c75d1803519b3674cd7acf231568b7e461ca71064fa0d1180f936b2; every per-step hash and the final weights equal the reference: yes
+clip M 4 W 4: SKIPPED (4 processes at once, at most 2)
+sgd M 2 reference (1 process, 2 accumulation micro-steps): final weights sha256 9f5baec7e30edc422ce97941c1f600da9ed643cb70892b1821b1a74660417694
+sgd M 2 W 2 (2 ranks sharing the device): final weights sha256 9f5baec7e30edc422ce97941c1f600da9ed643cb70892b1821b1a74660417694; every per-step hash and the final weights equal the reference: yes
+sgd M 4 reference (1 process, 4 accumulation micro-steps): final weights sha256 bb9775bd22f8edb3d99190f015fc25f74c3e54e36b257a4752257923795113f7
+sgd M 4 W 2 (2 ranks sharing the device): final weights sha256 bb9775bd22f8edb3d99190f015fc25f74c3e54e36b257a4752257923795113f7; every per-step hash and the final weights equal the reference: yes
+sgd M 4 W 4: SKIPPED (4 processes at once, at most 2)
+resume W 2 M 2 (checkpoint of step 6, relaunched to step 12): final weights sha256 9a24f95f50da08572824c0561890ea3213cc5076274b0cfaffe3bc6abba851d6; equals the reference and every per-step hash: yes
+2 nodes x 1 process on localhost, node copies: final weights sha256 9a24f95f50da08572824c0561890ea3213cc5076274b0cfaffe3bc6abba851d6; equals the reference, and node 1's checkpoint copy is node 0's byte for byte: yes
+run record: record mode=deterministic order=flat-rank backend=tcp platform=macos-aarch64-neon-rustc_1.94.1-matrixmultiply-0.3.11 libm=<sha256> world=2 auth=hmac-sha256 weight_checks=13 ok last_weights=9a24f95f50da08572824c0561890ea3213cc5076274b0cfaffe3bc6abba851d6
+# ended 2026-10-14T22:37:54Z, all identical

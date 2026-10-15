@@ -1,0 +1,427 @@
+# E2 gates, win-cuda (every nn::dist test: CPU gates and CUDA gates, no process cap)
+# rustc 1.94.1; Windows 10.0.26300.0 x86_64; 2026-10-15T02:08:41.6951829+03:00
+
+test nn::dist::tests::a_checkpoint_round_trips_and_refuses_another_world_size ... ok
+test nn::dist::tests::a_deferred_sum_folds_like_an_eager_one ... ok
+test nn::dist::tests::a_later_rank_may_not_pre_add_its_micro_steps ... ok
+test nn::dist::tests::a_ranks_device_follows_its_rank_on_the_node ... ok
+test nn::dist::tests::a_step_refuses_vars_off_the_groups_device ... ok
+test nn::dist::tests::a_stopped_rank_or_another_collective_fails_the_others ... ok
+test nn::dist::tests::absent_gradients_count_as_zeros ... ok
+test nn::dist::tests::accumulation_equals_the_engines_own_additions ... ok
+test nn::dist::tests::an_sgd_checkpoint_resumes_exactly_and_another_optimizer_is_refused ... ok
+test nn::dist::tests::body_ddp_worker ... ignored, run by the gates in separate processes
+test nn::dist::tests::body_device_repeat_worker ... ignored, run by its gate in separate processes
+test nn::dist::tests::body_failing_worker ... ignored, run by its gate in separate processes
+test nn::dist::tests::body_missing_nvml ... ignored, run by its wrapper in a fresh process
+test nn::dist::tests::body_reference_worker ... ignored, run by its gate in a separate process
+test nn::dist::tests::checkpoint_copies_on_other_nodes_hold_the_same_bytes_and_resume_checks_them ... ok
+test nn::dist::tests::collectives_are_rank_order_exact_at_world_sizes_1_2_4 ... ok
+test nn::dist::tests::cuda_a_missing_nvml_refuses_the_key_but_not_the_device ... ok
+absent gate M 2 W 1: final weights sha256 c0e3c2da36b137d5dc2ec6c2061e926d05415484e29dbac919496b397637133b (one process with zeros c0e3c2da36b137d5dc2ec6c2061e926d05415484e29dbac919496b397637133b)
+absent gate M 2 W 2: final weights sha256 c0e3c2da36b137d5dc2ec6c2061e926d05415484e29dbac919496b397637133b (one process with zeros c0e3c2da36b137d5dc2ec6c2061e926d05415484e29dbac919496b397637133b)
+absent gate M 4 W 1: final weights sha256 6e704dcc8af711e2318f4e7561272616951d390a75c775ea5d0cf448d1538ca1 (one process with zeros 6e704dcc8af711e2318f4e7561272616951d390a75c775ea5d0cf448d1538ca1)
+absent gate M 4 W 2: final weights sha256 6e704dcc8af711e2318f4e7561272616951d390a75c775ea5d0cf448d1538ca1 (one process with zeros 6e704dcc8af711e2318f4e7561272616951d390a75c775ea5d0cf448d1538ca1)
+absent gate M 4 W 4: final weights sha256 6e704dcc8af711e2318f4e7561272616951d390a75c775ea5d0cf448d1538ca1 (one process with zeros 6e704dcc8af711e2318f4e7561272616951d390a75c775ea5d0cf448d1538ca1)
+test nn::dist::tests::gate_absent_gradients_equal_one_process_with_zeros ... ok
+idle gate after W 1: final weights sha256 31c5d0b3bdceaa6d274f5816a0cd79374e4013cf2a34121049661038dd3e973d (one process 31c5d0b3bdceaa6d274f5816a0cd79374e4013cf2a34121049661038dd3e973d)
+idle gate after W 2: final weights sha256 31c5d0b3bdceaa6d274f5816a0cd79374e4013cf2a34121049661038dd3e973d (one process 31c5d0b3bdceaa6d274f5816a0cd79374e4013cf2a34121049661038dd3e973d)
+idle gate after W 4: final weights sha256 31c5d0b3bdceaa6d274f5816a0cd79374e4013cf2a34121049661038dd3e973d (one process 31c5d0b3bdceaa6d274f5816a0cd79374e4013cf2a34121049661038dd3e973d)
+idle gate torch W 1: final weights sha256 db9186e5296c2eaa33116a07b378b33428f69aea16e628158ad39f27ec397d7e (one process db9186e5296c2eaa33116a07b378b33428f69aea16e628158ad39f27ec397d7e)
+idle gate torch W 2: final weights sha256 db9186e5296c2eaa33116a07b378b33428f69aea16e628158ad39f27ec397d7e (one process db9186e5296c2eaa33116a07b378b33428f69aea16e628158ad39f27ec397d7e)
+idle gate torch W 4: final weights sha256 db9186e5296c2eaa33116a07b378b33428f69aea16e628158ad39f27ec397d7e (one process db9186e5296c2eaa33116a07b378b33428f69aea16e628158ad39f27ec397d7e)
+test nn::dist::tests::gate_an_idle_weight_is_left_alone_like_one_process ... ok
+cpu clip gate M 2 W 1: final weights sha256 aa1b37445adbfc1e269380a7a84ae4cb0b8a310558ca89c0dc723f714fe215c3 (clipped on 12 of 12 steps)
+cpu clip gate M 2 W 2: final weights sha256 aa1b37445adbfc1e269380a7a84ae4cb0b8a310558ca89c0dc723f714fe215c3 (clipped on 12 of 12 steps)
+cpu clip gate M 4 W 1: final weights sha256 dae9d10a3171b13c08f938804a539f946fc93f88bd54895c403bcf2b7c452034 (clipped on 12 of 12 steps)
+cpu clip gate M 4 W 2: final weights sha256 dae9d10a3171b13c08f938804a539f946fc93f88bd54895c403bcf2b7c452034 (clipped on 12 of 12 steps)
+cpu clip gate M 4 W 4: final weights sha256 dae9d10a3171b13c08f938804a539f946fc93f88bd54895c403bcf2b7c452034 (clipped on 12 of 12 steps)
+test nn::dist::tests::gate_clipping_world_sizes_equal_one_process ... ok
+w2-killed: rank 1 killed at step 7: rank 1 failed (exit code: 1); the job was stopped
+resume W 2: final weights sha256 3b94e85f76b93c1c250415836e41b3afaf15c70294d4ac01c17550f2becae08b (uninterrupted 3b94e85f76b93c1c250415836e41b3afaf15c70294d4ac01c17550f2becae08b)
+w4-killed: rank 2 killed at step 5: rank 2 failed (exit code: 1); the job was stopped
+resume W 4: final weights sha256 968508fe80c79c35340ee7227044ca2242038d6b7884858c979950c2680ead83 (uninterrupted 968508fe80c79c35340ee7227044ca2242038d6b7884858c979950c2680ead83)
+test nn::dist::tests::gate_kill_and_resume_equals_the_uninterrupted_run ... ok
+killed: rank 1 killed at step 7: rank 1 failed (exit code: 1); the job was stopped
+cpu SGD-momentum resume W 2: final weights sha256 2cff4c2a35d5ba1a70e9eed9b1f941174336d33d49675bc62dd9d1134c1454b2 (uninterrupted 2cff4c2a35d5ba1a70e9eed9b1f941174336d33d49675bc62dd9d1134c1454b2)
+test nn::dist::tests::gate_kill_and_resume_under_sgd_with_momentum ... ok
+gate m2-one-process: final weights sha256 3b94e85f76b93c1c250415836e41b3afaf15c70294d4ac01c17550f2becae08b (0.1 s)
+gate m2-one-node-two-processes: final weights sha256 3b94e85f76b93c1c250415836e41b3afaf15c70294d4ac01c17550f2becae08b (0.2 s)
+gate m2-two-nodes-one-process-each: final weights sha256 3b94e85f76b93c1c250415836e41b3afaf15c70294d4ac01c17550f2becae08b (0.2 s)
+gate m4-one-process: final weights sha256 968508fe80c79c35340ee7227044ca2242038d6b7884858c979950c2680ead83 (0.2 s)
+gate m4-two-processes: final weights sha256 968508fe80c79c35340ee7227044ca2242038d6b7884858c979950c2680ead83 (0.2 s)
+gate m4-four-processes: final weights sha256 968508fe80c79c35340ee7227044ca2242038d6b7884858c979950c2680ead83 (0.2 s)
+gate m2-distribution-off: final weights sha256 3b94e85f76b93c1c250415836e41b3afaf15c70294d4ac01c17550f2becae08b
+test nn::dist::tests::gate_world_sizes_1_2_4_equal_one_process_with_accumulation ... ok
+test nn::dist::tests::gpu_a_job_mixing_gpu_and_cpu_ranks_is_refused ... ok
+cuda absent gate M 2 W 1: final weights sha256 ed14a6550cd5773878d04a6516ab7f3c5a9ab9df6768db24c6f7f8d0c907aa1c (one GPU with zeros ed14a6550cd5773878d04a6516ab7f3c5a9ab9df6768db24c6f7f8d0c907aa1c)
+cuda absent gate M 2 W 2: final weights sha256 ed14a6550cd5773878d04a6516ab7f3c5a9ab9df6768db24c6f7f8d0c907aa1c (one GPU with zeros ed14a6550cd5773878d04a6516ab7f3c5a9ab9df6768db24c6f7f8d0c907aa1c)
+cuda absent gate M 4 W 1: final weights sha256 5bae8705a1f990ecfdbae8f8f19619b914347bdd753de2d0fb092cfc29ff6f60 (one GPU with zeros 5bae8705a1f990ecfdbae8f8f19619b914347bdd753de2d0fb092cfc29ff6f60)
+cuda absent gate M 4 W 2: final weights sha256 5bae8705a1f990ecfdbae8f8f19619b914347bdd753de2d0fb092cfc29ff6f60 (one GPU with zeros 5bae8705a1f990ecfdbae8f8f19619b914347bdd753de2d0fb092cfc29ff6f60)
+cuda absent gate M 4 W 4: final weights sha256 5bae8705a1f990ecfdbae8f8f19619b914347bdd753de2d0fb092cfc29ff6f60 (one GPU with zeros 5bae8705a1f990ecfdbae8f8f19619b914347bdd753de2d0fb092cfc29ff6f60)
+cuda idle gate after W 1: final weights sha256 54f777084d76890aa834b87be8c76a77a5861386c125d901935e3e0fdcf7bc2f (one GPU 54f777084d76890aa834b87be8c76a77a5861386c125d901935e3e0fdcf7bc2f)
+cuda idle gate after W 2: final weights sha256 54f777084d76890aa834b87be8c76a77a5861386c125d901935e3e0fdcf7bc2f (one GPU 54f777084d76890aa834b87be8c76a77a5861386c125d901935e3e0fdcf7bc2f)
+cuda idle gate after W 4: final weights sha256 54f777084d76890aa834b87be8c76a77a5861386c125d901935e3e0fdcf7bc2f (one GPU 54f777084d76890aa834b87be8c76a77a5861386c125d901935e3e0fdcf7bc2f)
+cuda idle gate torch W 1: final weights sha256 136006461c91ed08f4845a58562cc4c5a433fb40507c805f593c6d8f76d33da0 (one GPU 136006461c91ed08f4845a58562cc4c5a433fb40507c805f593c6d8f76d33da0)
+cuda idle gate torch W 2: final weights sha256 136006461c91ed08f4845a58562cc4c5a433fb40507c805f593c6d8f76d33da0 (one GPU 136006461c91ed08f4845a58562cc4c5a433fb40507c805f593c6d8f76d33da0)
+cuda idle gate torch W 4: final weights sha256 136006461c91ed08f4845a58562cc4c5a433fb40507c805f593c6d8f76d33da0 (one GPU 136006461c91ed08f4845a58562cc4c5a433fb40507c805f593c6d8f76d33da0)
+test nn::dist::tests::gpu_gate_absent_gradients_and_an_idle_weight_equal_one_gpu ... ok
+cuda clip gate M 2 W 1: final weights sha256 d481ddb36d6a9c3f1a169e67d6eda1d1b6fa6a93edd3944a4d1edf30f30de873 (clipped on 12 of 12 steps)
+cuda clip gate M 2 W 2: final weights sha256 d481ddb36d6a9c3f1a169e67d6eda1d1b6fa6a93edd3944a4d1edf30f30de873 (clipped on 12 of 12 steps)
+cuda clip gate M 4 W 1: final weights sha256 561ebc59ea9cce995956425c60e59b15d3a1049428987ffb115ab00589ff93e3 (clipped on 12 of 12 steps)
+cuda clip gate M 4 W 2: final weights sha256 561ebc59ea9cce995956425c60e59b15d3a1049428987ffb115ab00589ff93e3 (clipped on 12 of 12 steps)
+cuda clip gate M 4 W 4: final weights sha256 561ebc59ea9cce995956425c60e59b15d3a1049428987ffb115ab00589ff93e3 (clipped on 12 of 12 steps)
+test nn::dist::tests::gpu_gate_clipping_world_sizes_equal_one_gpu ... ok
+killed: rank 1 killed at step 7: rank 1 failed (exit code: 1); the job was stopped
+cuda resume W 2: final weights sha256 3263b99095eded48b1d0cc9c69d2492b56d9dfe38573ed35f797a6132339ff49 (uninterrupted 3263b99095eded48b1d0cc9c69d2492b56d9dfe38573ed35f797a6132339ff49)
+cuda resume: refused at world size 1 and on the CPU
+test nn::dist::tests::gpu_gate_kill_and_resume_equals_the_uninterrupted_run ... ok
+killed: rank 1 killed at step 7: rank 1 failed (exit code: 1); the job was stopped
+cuda SGD-momentum resume W 2: final weights sha256 7650ce860e8db697d96e771ece5d20fca65c534d33353d6cc31fcb1ebf18d39c (uninterrupted 7650ce860e8db697d96e771ece5d20fca65c534d33353d6cc31fcb1ebf18d39c)
+test nn::dist::tests::gpu_gate_kill_and_resume_under_sgd_with_momentum ... ok
+cuda gate m2-one-process: final weights sha256 3263b99095eded48b1d0cc9c69d2492b56d9dfe38573ed35f797a6132339ff49 (1.0 s)
+cuda gate m2-one-process: record mode=deterministic order=flat-rank backend=tcp platform=windows-x86_64-avx+avx2+fma-rustc_1.94.1-matrixmultiply-0.3.11 libm=038ad17c0b6624b2302ddc61c52a5a7455269b689d13bcedb7e2c4fe5f6f1c69 device=cuda-NVIDIA_GeForce_RTX_4060_Laptop_GPU-sm89-driver13040-nvrtc12.6-nofastmath-fmadoff-kernels-<hex>-driver-release-617.14 world=1 auth=hmac-sha256 weight_checks=13 ok last_weights=3263b99095eded48b1d0cc9c69d2492b56d9dfe38573ed35f797a6132339ff49
+cuda gate m2-two-processes: final weights sha256 3263b99095eded48b1d0cc9c69d2492b56d9dfe38573ed35f797a6132339ff49 (1.1 s)
+cuda gate m2-two-processes: record mode=deterministic order=flat-rank backend=tcp platform=windows-x86_64-avx+avx2+fma-rustc_1.94.1-matrixmultiply-0.3.11 libm=038ad17c0b6624b2302ddc61c52a5a7455269b689d13bcedb7e2c4fe5f6f1c69 device=cuda-NVIDIA_GeForce_RTX_4060_Laptop_GPU-sm89-driver13040-nvrtc12.6-nofastmath-fmadoff-kernels-<hex>-driver-release-617.14 world=2 auth=hmac-sha256 weight_checks=13 ok last_weights=3263b99095eded48b1d0cc9c69d2492b56d9dfe38573ed35f797a6132339ff49
+cuda gate m4-one-process: final weights sha256 4021208e74c5970b4ba0399cda524de9c497856635ab4a673066ebee72965d04 (1.0 s)
+cuda gate m4-one-process: record mode=deterministic order=flat-rank backend=tcp platform=windows-x86_64-avx+avx2+fma-rustc_1.94.1-matrixmultiply-0.3.11 libm=038ad17c0b6624b2302ddc61c52a5a7455269b689d13bcedb7e2c4fe5f6f1c69 device=cuda-NVIDIA_GeForce_RTX_4060_Laptop_GPU-sm89-driver13040-nvrtc12.6-nofastmath-fmadoff-kernels-<hex>-driver-release-617.14 world=1 auth=hmac-sha256 weight_checks=13 ok last_weights=4021208e74c5970b4ba0399cda524de9c497856635ab4a673066ebee72965d04
+cuda gate m4-two-processes: final weights sha256 4021208e74c5970b4ba0399cda524de9c497856635ab4a673066ebee72965d04 (1.7 s)
+cuda gate m4-two-processes: record mode=deterministic order=flat-rank backend=tcp platform=windows-x86_64-avx+avx2+fma-rustc_1.94.1-matrixmultiply-0.3.11 libm=038ad17c0b6624b2302ddc61c52a5a7455269b689d13bcedb7e2c4fe5f6f1c69 device=cuda-NVIDIA_GeForce_RTX_4060_Laptop_GPU-sm89-driver13040-nvrtc12.6-nofastmath-fmadoff-kernels-<hex>-driver-release-617.14 world=2 auth=hmac-sha256 weight_checks=13 ok last_weights=4021208e74c5970b4ba0399cda524de9c497856635ab4a673066ebee72965d04
+cuda gate m4-four-processes: final weights sha256 4021208e74c5970b4ba0399cda524de9c497856635ab4a673066ebee72965d04 (1.8 s)
+cuda gate m4-four-processes: record mode=deterministic order=flat-rank backend=tcp platform=windows-x86_64-avx+avx2+fma-rustc_1.94.1-matrixmultiply-0.3.11 libm=038ad17c0b6624b2302ddc61c52a5a7455269b689d13bcedb7e2c4fe5f6f1c69 device=cuda-NVIDIA_GeForce_RTX_4060_Laptop_GPU-sm89-driver13040-nvrtc12.6-nofastmath-fmadoff-kernels-<hex>-driver-release-617.14 world=4 auth=hmac-sha256 weight_checks=13 ok last_weights=4021208e74c5970b4ba0399cda524de9c497856635ab4a673066ebee72965d04
+cuda gate m2-distribution-off: final weights sha256 3263b99095eded48b1d0cc9c69d2492b56d9dfe38573ed35f797a6132339ff49
+test nn::dist::tests::gpu_gate_two_ranks_on_one_gpu_equal_one_gpu_with_accumulation ... ok
+cuda repeat first: 1.4 s
+cuda repeat second: 1.3 s
+cuda repeat steps.txt: sha256 3b5921ae3902abc7365a77d220e5f26403ef0e733c3235a9f94e9eaf5da2dbd7 (both runs)
+cuda repeat gate.json: sha256 3263b99095eded48b1d0cc9c69d2492b56d9dfe38573ed35f797a6132339ff49 (both runs)
+cuda repeat moe.json: sha256 e576bd23c6877557157cd640e50d34e8fae238f8bba7535d10466f1d2602f38b (both runs)
+cuda repeat wide.json: sha256 ff7107fe1904fbcb7b58ec25e8e8c38158f3e36158db7f4e43e3ecaf18805230 (both runs)
+cuda repeat key.txt: sha256 0a7fd324d3a7e558579528fe27d73681e4cfcc79ad1fe390ca5e87b8cfcc6143 (both runs)
+cuda repeat key: device=cuda-NVIDIA_GeForce_RTX_4060_Laptop_GPU-sm89-driver13040-nvrtc12.6-nofastmath-fmadoff-kernels-<hex>-driver-release-617.14
+test nn::dist::tests::gpu_training_is_byte_identical_run_to_run ... ok
+test nn::dist::tests::group_options_are_built_with_a_builder ... ok
+test nn::dist::tests::one_process_with_one_micro_step_equals_the_plain_trainer ... ok
+test nn::dist::tests::shard_hashes_are_recorded_per_seed_rank_and_world_size ... ok
+test nn::dist::tests::shards_partition_the_single_process_stream ... ok
+test nn::dist::tests::the_chunk_plan_covers_every_element_once_in_order ... ok
+test nn::dist::tests::the_environment_is_torchruns ... ok
+test nn::dist::tests::the_gate_can_see_a_changed_order ... ok
+test nn::dist::tests::the_gradient_all_reduce_folds_the_global_micro_steps_in_order ... ok
+test nn::dist::tests::the_job_secret_reads_hex_and_never_shows_its_bytes ... ok
+test nn::dist::tests::the_kernel_sources_hold_no_atomic_operations ... ok
+test nn::dist::tests::the_launcher_stops_the_job_when_a_rank_fails ... ok
+test nn::dist::tests::the_maths_fingerprint_reaches_the_ranges_the_engine_uses ... ok
+test nn::dist::tests::the_ordered_sum_starts_from_the_first_contribution ... ok
+test nn::dist::tests::the_rendezvous_refuses_another_job_key_platform_or_world_size ... ok
+test nn::dist::tests::the_secret_never_appears_in_records_logs_or_checkpoints ... ok
+test nn::dist::tests::the_single_process_group_is_the_identity ... ok
+test nn::dist::tests::the_sum_checks_shapes_and_dtypes ... ok
+sharded round trip stage 3 flat: 8 files byte-identical, meta sha256 ebe060c07046141f9ed96dd54ec52000bdb2c604e2759f30124bf8631933a43e
+sharded round trip stage 1 by-var: 6 files byte-identical, meta sha256 0bd772dde4c75c957e9190088f3b7ff7dab7c21472a8f5239c17def86dc29fe9
+test nn::dist::tests::zero_tests::a_sharded_checkpoint_round_trips_byte_for_byte_and_resumes_exactly ... ok
+test nn::dist::tests::zero_tests::consolidated_and_data_parallel_checkpoints_resume_into_each_other ... ok
+cpu zero absent gate stage 1 flat M 2 W 1: final weights sha256 c0e3c2da36b137d5dc2ec6c2061e926d05415484e29dbac919496b397637133b (one process with zeros c0e3c2da36b137d5dc2ec6c2061e926d05415484e29dbac919496b397637133b)
+cpu zero absent gate stage 1 flat M 2 W 2: final weights sha256 c0e3c2da36b137d5dc2ec6c2061e926d05415484e29dbac919496b397637133b (one process with zeros c0e3c2da36b137d5dc2ec6c2061e926d05415484e29dbac919496b397637133b)
+cpu zero absent gate stage 2 flat M 2 W 1: final weights sha256 c0e3c2da36b137d5dc2ec6c2061e926d05415484e29dbac919496b397637133b (one process with zeros c0e3c2da36b137d5dc2ec6c2061e926d05415484e29dbac919496b397637133b)
+cpu zero absent gate stage 2 flat M 2 W 2: final weights sha256 c0e3c2da36b137d5dc2ec6c2061e926d05415484e29dbac919496b397637133b (one process with zeros c0e3c2da36b137d5dc2ec6c2061e926d05415484e29dbac919496b397637133b)
+cpu zero absent gate stage 3 flat M 2 W 1: final weights sha256 c0e3c2da36b137d5dc2ec6c2061e926d05415484e29dbac919496b397637133b (one process with zeros c0e3c2da36b137d5dc2ec6c2061e926d05415484e29dbac919496b397637133b)
+cpu zero absent gate stage 3 flat M 2 W 2: final weights sha256 c0e3c2da36b137d5dc2ec6c2061e926d05415484e29dbac919496b397637133b (one process with zeros c0e3c2da36b137d5dc2ec6c2061e926d05415484e29dbac919496b397637133b)
+cpu zero absent gate stage 1 by-var M 2 W 1: final weights sha256 c0e3c2da36b137d5dc2ec6c2061e926d05415484e29dbac919496b397637133b (one process with zeros c0e3c2da36b137d5dc2ec6c2061e926d05415484e29dbac919496b397637133b)
+cpu zero absent gate stage 1 by-var M 2 W 2: final weights sha256 c0e3c2da36b137d5dc2ec6c2061e926d05415484e29dbac919496b397637133b (one process with zeros c0e3c2da36b137d5dc2ec6c2061e926d05415484e29dbac919496b397637133b)
+cpu zero absent gate stage 2 by-var M 2 W 1: final weights sha256 c0e3c2da36b137d5dc2ec6c2061e926d05415484e29dbac919496b397637133b (one process with zeros c0e3c2da36b137d5dc2ec6c2061e926d05415484e29dbac919496b397637133b)
+cpu zero absent gate stage 2 by-var M 2 W 2: final weights sha256 c0e3c2da36b137d5dc2ec6c2061e926d05415484e29dbac919496b397637133b (one process with zeros c0e3c2da36b137d5dc2ec6c2061e926d05415484e29dbac919496b397637133b)
+cpu zero absent gate stage 3 by-var M 2 W 1: final weights sha256 c0e3c2da36b137d5dc2ec6c2061e926d05415484e29dbac919496b397637133b (one process with zeros c0e3c2da36b137d5dc2ec6c2061e926d05415484e29dbac919496b397637133b)
+cpu zero absent gate stage 3 by-var M 2 W 2: final weights sha256 c0e3c2da36b137d5dc2ec6c2061e926d05415484e29dbac919496b397637133b (one process with zeros c0e3c2da36b137d5dc2ec6c2061e926d05415484e29dbac919496b397637133b)
+cpu zero absent gate stage 1 flat M 4 W 1: final weights sha256 6e704dcc8af711e2318f4e7561272616951d390a75c775ea5d0cf448d1538ca1 (one process with zeros 6e704dcc8af711e2318f4e7561272616951d390a75c775ea5d0cf448d1538ca1)
+cpu zero absent gate stage 1 flat M 4 W 2: final weights sha256 6e704dcc8af711e2318f4e7561272616951d390a75c775ea5d0cf448d1538ca1 (one process with zeros 6e704dcc8af711e2318f4e7561272616951d390a75c775ea5d0cf448d1538ca1)
+cpu zero absent gate stage 1 flat M 4 W 4: final weights sha256 6e704dcc8af711e2318f4e7561272616951d390a75c775ea5d0cf448d1538ca1 (one process with zeros 6e704dcc8af711e2318f4e7561272616951d390a75c775ea5d0cf448d1538ca1)
+cpu zero absent gate stage 2 flat M 4 W 1: final weights sha256 6e704dcc8af711e2318f4e7561272616951d390a75c775ea5d0cf448d1538ca1 (one process with zeros 6e704dcc8af711e2318f4e7561272616951d390a75c775ea5d0cf448d1538ca1)
+cpu zero absent gate stage 2 flat M 4 W 2: final weights sha256 6e704dcc8af711e2318f4e7561272616951d390a75c775ea5d0cf448d1538ca1 (one process with zeros 6e704dcc8af711e2318f4e7561272616951d390a75c775ea5d0cf448d1538ca1)
+cpu zero absent gate stage 2 flat M 4 W 4: final weights sha256 6e704dcc8af711e2318f4e7561272616951d390a75c775ea5d0cf448d1538ca1 (one process with zeros 6e704dcc8af711e2318f4e7561272616951d390a75c775ea5d0cf448d1538ca1)
+cpu zero absent gate stage 3 flat M 4 W 1: final weights sha256 6e704dcc8af711e2318f4e7561272616951d390a75c775ea5d0cf448d1538ca1 (one process with zeros 6e704dcc8af711e2318f4e7561272616951d390a75c775ea5d0cf448d1538ca1)
+cpu zero absent gate stage 3 flat M 4 W 2: final weights sha256 6e704dcc8af711e2318f4e7561272616951d390a75c775ea5d0cf448d1538ca1 (one process with zeros 6e704dcc8af711e2318f4e7561272616951d390a75c775ea5d0cf448d1538ca1)
+cpu zero absent gate stage 3 flat M 4 W 4: final weights sha256 6e704dcc8af711e2318f4e7561272616951d390a75c775ea5d0cf448d1538ca1 (one process with zeros 6e704dcc8af711e2318f4e7561272616951d390a75c775ea5d0cf448d1538ca1)
+cpu zero absent gate stage 1 by-var M 4 W 1: final weights sha256 6e704dcc8af711e2318f4e7561272616951d390a75c775ea5d0cf448d1538ca1 (one process with zeros 6e704dcc8af711e2318f4e7561272616951d390a75c775ea5d0cf448d1538ca1)
+cpu zero absent gate stage 1 by-var M 4 W 2: final weights sha256 6e704dcc8af711e2318f4e7561272616951d390a75c775ea5d0cf448d1538ca1 (one process with zeros 6e704dcc8af711e2318f4e7561272616951d390a75c775ea5d0cf448d1538ca1)
+cpu zero absent gate stage 1 by-var M 4 W 4: final weights sha256 6e704dcc8af711e2318f4e7561272616951d390a75c775ea5d0cf448d1538ca1 (one process with zeros 6e704dcc8af711e2318f4e7561272616951d390a75c775ea5d0cf448d1538ca1)
+cpu zero absent gate stage 2 by-var M 4 W 1: final weights sha256 6e704dcc8af711e2318f4e7561272616951d390a75c775ea5d0cf448d1538ca1 (one process with zeros 6e704dcc8af711e2318f4e7561272616951d390a75c775ea5d0cf448d1538ca1)
+cpu zero absent gate stage 2 by-var M 4 W 2: final weights sha256 6e704dcc8af711e2318f4e7561272616951d390a75c775ea5d0cf448d1538ca1 (one process with zeros 6e704dcc8af711e2318f4e7561272616951d390a75c775ea5d0cf448d1538ca1)
+cpu zero absent gate stage 2 by-var M 4 W 4: final weights sha256 6e704dcc8af711e2318f4e7561272616951d390a75c775ea5d0cf448d1538ca1 (one process with zeros 6e704dcc8af711e2318f4e7561272616951d390a75c775ea5d0cf448d1538ca1)
+cpu zero absent gate stage 3 by-var M 4 W 1: final weights sha256 6e704dcc8af711e2318f4e7561272616951d390a75c775ea5d0cf448d1538ca1 (one process with zeros 6e704dcc8af711e2318f4e7561272616951d390a75c775ea5d0cf448d1538ca1)
+cpu zero absent gate stage 3 by-var M 4 W 2: final weights sha256 6e704dcc8af711e2318f4e7561272616951d390a75c775ea5d0cf448d1538ca1 (one process with zeros 6e704dcc8af711e2318f4e7561272616951d390a75c775ea5d0cf448d1538ca1)
+cpu zero absent gate stage 3 by-var M 4 W 4: final weights sha256 6e704dcc8af711e2318f4e7561272616951d390a75c775ea5d0cf448d1538ca1 (one process with zeros 6e704dcc8af711e2318f4e7561272616951d390a75c775ea5d0cf448d1538ca1)
+cpu zero idle gate after stage 1 flat W 1: final weights sha256 31c5d0b3bdceaa6d274f5816a0cd79374e4013cf2a34121049661038dd3e973d (one process 31c5d0b3bdceaa6d274f5816a0cd79374e4013cf2a34121049661038dd3e973d)
+cpu zero idle gate after stage 1 flat W 2: final weights sha256 31c5d0b3bdceaa6d274f5816a0cd79374e4013cf2a34121049661038dd3e973d (one process 31c5d0b3bdceaa6d274f5816a0cd79374e4013cf2a34121049661038dd3e973d)
+cpu zero idle gate after stage 1 flat W 4: final weights sha256 31c5d0b3bdceaa6d274f5816a0cd79374e4013cf2a34121049661038dd3e973d (one process 31c5d0b3bdceaa6d274f5816a0cd79374e4013cf2a34121049661038dd3e973d)
+cpu zero idle gate after stage 2 flat W 1: final weights sha256 31c5d0b3bdceaa6d274f5816a0cd79374e4013cf2a34121049661038dd3e973d (one process 31c5d0b3bdceaa6d274f5816a0cd79374e4013cf2a34121049661038dd3e973d)
+cpu zero idle gate after stage 2 flat W 2: final weights sha256 31c5d0b3bdceaa6d274f5816a0cd79374e4013cf2a34121049661038dd3e973d (one process 31c5d0b3bdceaa6d274f5816a0cd79374e4013cf2a34121049661038dd3e973d)
+cpu zero idle gate after stage 2 flat W 4: final weights sha256 31c5d0b3bdceaa6d274f5816a0cd79374e4013cf2a34121049661038dd3e973d (one process 31c5d0b3bdceaa6d274f5816a0cd79374e4013cf2a34121049661038dd3e973d)
+cpu zero idle gate after stage 3 flat W 1: final weights sha256 31c5d0b3bdceaa6d274f5816a0cd79374e4013cf2a34121049661038dd3e973d (one process 31c5d0b3bdceaa6d274f5816a0cd79374e4013cf2a34121049661038dd3e973d)
+cpu zero idle gate after stage 3 flat W 2: final weights sha256 31c5d0b3bdceaa6d274f5816a0cd79374e4013cf2a34121049661038dd3e973d (one process 31c5d0b3bdceaa6d274f5816a0cd79374e4013cf2a34121049661038dd3e973d)
+cpu zero idle gate after stage 3 flat W 4: final weights sha256 31c5d0b3bdceaa6d274f5816a0cd79374e4013cf2a34121049661038dd3e973d (one process 31c5d0b3bdceaa6d274f5816a0cd79374e4013cf2a34121049661038dd3e973d)
+cpu zero idle gate after stage 1 by-var W 1: final weights sha256 31c5d0b3bdceaa6d274f5816a0cd79374e4013cf2a34121049661038dd3e973d (one process 31c5d0b3bdceaa6d274f5816a0cd79374e4013cf2a34121049661038dd3e973d)
+cpu zero idle gate after stage 1 by-var W 2: final weights sha256 31c5d0b3bdceaa6d274f5816a0cd79374e4013cf2a34121049661038dd3e973d (one process 31c5d0b3bdceaa6d274f5816a0cd79374e4013cf2a34121049661038dd3e973d)
+cpu zero idle gate after stage 1 by-var W 4: final weights sha256 31c5d0b3bdceaa6d274f5816a0cd79374e4013cf2a34121049661038dd3e973d (one process 31c5d0b3bdceaa6d274f5816a0cd79374e4013cf2a34121049661038dd3e973d)
+cpu zero idle gate after stage 2 by-var W 1: final weights sha256 31c5d0b3bdceaa6d274f5816a0cd79374e4013cf2a34121049661038dd3e973d (one process 31c5d0b3bdceaa6d274f5816a0cd79374e4013cf2a34121049661038dd3e973d)
+cpu zero idle gate after stage 2 by-var W 2: final weights sha256 31c5d0b3bdceaa6d274f5816a0cd79374e4013cf2a34121049661038dd3e973d (one process 31c5d0b3bdceaa6d274f5816a0cd79374e4013cf2a34121049661038dd3e973d)
+cpu zero idle gate after stage 2 by-var W 4: final weights sha256 31c5d0b3bdceaa6d274f5816a0cd79374e4013cf2a34121049661038dd3e973d (one process 31c5d0b3bdceaa6d274f5816a0cd79374e4013cf2a34121049661038dd3e973d)
+cpu zero idle gate after stage 3 by-var W 1: final weights sha256 31c5d0b3bdceaa6d274f5816a0cd79374e4013cf2a34121049661038dd3e973d (one process 31c5d0b3bdceaa6d274f5816a0cd79374e4013cf2a34121049661038dd3e973d)
+cpu zero idle gate after stage 3 by-var W 2: final weights sha256 31c5d0b3bdceaa6d274f5816a0cd79374e4013cf2a34121049661038dd3e973d (one process 31c5d0b3bdceaa6d274f5816a0cd79374e4013cf2a34121049661038dd3e973d)
+cpu zero idle gate after stage 3 by-var W 4: final weights sha256 31c5d0b3bdceaa6d274f5816a0cd79374e4013cf2a34121049661038dd3e973d (one process 31c5d0b3bdceaa6d274f5816a0cd79374e4013cf2a34121049661038dd3e973d)
+cpu zero idle gate torch stage 1 flat W 1: final weights sha256 db9186e5296c2eaa33116a07b378b33428f69aea16e628158ad39f27ec397d7e (one process db9186e5296c2eaa33116a07b378b33428f69aea16e628158ad39f27ec397d7e)
+cpu zero idle gate torch stage 1 flat W 2: final weights sha256 db9186e5296c2eaa33116a07b378b33428f69aea16e628158ad39f27ec397d7e (one process db9186e5296c2eaa33116a07b378b33428f69aea16e628158ad39f27ec397d7e)
+cpu zero idle gate torch stage 1 flat W 4: final weights sha256 db9186e5296c2eaa33116a07b378b33428f69aea16e628158ad39f27ec397d7e (one process db9186e5296c2eaa33116a07b378b33428f69aea16e628158ad39f27ec397d7e)
+cpu zero idle gate torch stage 2 flat W 1: final weights sha256 db9186e5296c2eaa33116a07b378b33428f69aea16e628158ad39f27ec397d7e (one process db9186e5296c2eaa33116a07b378b33428f69aea16e628158ad39f27ec397d7e)
+cpu zero idle gate torch stage 2 flat W 2: final weights sha256 db9186e5296c2eaa33116a07b378b33428f69aea16e628158ad39f27ec397d7e (one process db9186e5296c2eaa33116a07b378b33428f69aea16e628158ad39f27ec397d7e)
+cpu zero idle gate torch stage 2 flat W 4: final weights sha256 db9186e5296c2eaa33116a07b378b33428f69aea16e628158ad39f27ec397d7e (one process db9186e5296c2eaa33116a07b378b33428f69aea16e628158ad39f27ec397d7e)
+cpu zero idle gate torch stage 3 flat W 1: final weights sha256 db9186e5296c2eaa33116a07b378b33428f69aea16e628158ad39f27ec397d7e (one process db9186e5296c2eaa33116a07b378b33428f69aea16e628158ad39f27ec397d7e)
+cpu zero idle gate torch stage 3 flat W 2: final weights sha256 db9186e5296c2eaa33116a07b378b33428f69aea16e628158ad39f27ec397d7e (one process db9186e5296c2eaa33116a07b378b33428f69aea16e628158ad39f27ec397d7e)
+cpu zero idle gate torch stage 3 flat W 4: final weights sha256 db9186e5296c2eaa33116a07b378b33428f69aea16e628158ad39f27ec397d7e (one process db9186e5296c2eaa33116a07b378b33428f69aea16e628158ad39f27ec397d7e)
+cpu zero idle gate torch stage 1 by-var W 1: final weights sha256 db9186e5296c2eaa33116a07b378b33428f69aea16e628158ad39f27ec397d7e (one process db9186e5296c2eaa33116a07b378b33428f69aea16e628158ad39f27ec397d7e)
+cpu zero idle gate torch stage 1 by-var W 2: final weights sha256 db9186e5296c2eaa33116a07b378b33428f69aea16e628158ad39f27ec397d7e (one process db9186e5296c2eaa33116a07b378b33428f69aea16e628158ad39f27ec397d7e)
+cpu zero idle gate torch stage 1 by-var W 4: final weights sha256 db9186e5296c2eaa33116a07b378b33428f69aea16e628158ad39f27ec397d7e (one process db9186e5296c2eaa33116a07b378b33428f69aea16e628158ad39f27ec397d7e)
+cpu zero idle gate torch stage 2 by-var W 1: final weights sha256 db9186e5296c2eaa33116a07b378b33428f69aea16e628158ad39f27ec397d7e (one process db9186e5296c2eaa33116a07b378b33428f69aea16e628158ad39f27ec397d7e)
+cpu zero idle gate torch stage 2 by-var W 2: final weights sha256 db9186e5296c2eaa33116a07b378b33428f69aea16e628158ad39f27ec397d7e (one process db9186e5296c2eaa33116a07b378b33428f69aea16e628158ad39f27ec397d7e)
+cpu zero idle gate torch stage 2 by-var W 4: final weights sha256 db9186e5296c2eaa33116a07b378b33428f69aea16e628158ad39f27ec397d7e (one process db9186e5296c2eaa33116a07b378b33428f69aea16e628158ad39f27ec397d7e)
+cpu zero idle gate torch stage 3 by-var W 1: final weights sha256 db9186e5296c2eaa33116a07b378b33428f69aea16e628158ad39f27ec397d7e (one process db9186e5296c2eaa33116a07b378b33428f69aea16e628158ad39f27ec397d7e)
+cpu zero idle gate torch stage 3 by-var W 2: final weights sha256 db9186e5296c2eaa33116a07b378b33428f69aea16e628158ad39f27ec397d7e (one process db9186e5296c2eaa33116a07b378b33428f69aea16e628158ad39f27ec397d7e)
+cpu zero idle gate torch stage 3 by-var W 4: final weights sha256 db9186e5296c2eaa33116a07b378b33428f69aea16e628158ad39f27ec397d7e (one process db9186e5296c2eaa33116a07b378b33428f69aea16e628158ad39f27ec397d7e)
+test nn::dist::tests::zero_tests::gate_zero_absent_gradients_and_an_idle_weight_equal_one_process ... ok
+cpu zero clip gate M 2 W 1: DDP final weights sha256 aa1b37445adbfc1e269380a7a84ae4cb0b8a310558ca89c0dc723f714fe215c3
+cpu zero clip gate stage 1 flat M 2 W 1: final weights sha256 aa1b37445adbfc1e269380a7a84ae4cb0b8a310558ca89c0dc723f714fe215c3 (clipped on 12 of 12 steps)
+cpu zero clip gate stage 2 flat M 2 W 1: final weights sha256 aa1b37445adbfc1e269380a7a84ae4cb0b8a310558ca89c0dc723f714fe215c3 (clipped on 12 of 12 steps)
+cpu zero clip gate stage 3 flat M 2 W 1: final weights sha256 aa1b37445adbfc1e269380a7a84ae4cb0b8a310558ca89c0dc723f714fe215c3 (clipped on 12 of 12 steps)
+cpu zero clip gate stage 1 by-var M 2 W 1: final weights sha256 aa1b37445adbfc1e269380a7a84ae4cb0b8a310558ca89c0dc723f714fe215c3 (clipped on 12 of 12 steps)
+cpu zero clip gate stage 2 by-var M 2 W 1: final weights sha256 aa1b37445adbfc1e269380a7a84ae4cb0b8a310558ca89c0dc723f714fe215c3 (clipped on 12 of 12 steps)
+cpu zero clip gate stage 3 by-var M 2 W 1: final weights sha256 aa1b37445adbfc1e269380a7a84ae4cb0b8a310558ca89c0dc723f714fe215c3 (clipped on 12 of 12 steps)
+cpu zero clip gate M 2 W 2: DDP final weights sha256 aa1b37445adbfc1e269380a7a84ae4cb0b8a310558ca89c0dc723f714fe215c3
+cpu zero clip gate stage 1 flat M 2 W 2: final weights sha256 aa1b37445adbfc1e269380a7a84ae4cb0b8a310558ca89c0dc723f714fe215c3 (clipped on 12 of 12 steps)
+cpu zero clip gate stage 2 flat M 2 W 2: final weights sha256 aa1b37445adbfc1e269380a7a84ae4cb0b8a310558ca89c0dc723f714fe215c3 (clipped on 12 of 12 steps)
+cpu zero clip gate stage 3 flat M 2 W 2: final weights sha256 aa1b37445adbfc1e269380a7a84ae4cb0b8a310558ca89c0dc723f714fe215c3 (clipped on 12 of 12 steps)
+cpu zero clip gate stage 1 by-var M 2 W 2: final weights sha256 aa1b37445adbfc1e269380a7a84ae4cb0b8a310558ca89c0dc723f714fe215c3 (clipped on 12 of 12 steps)
+cpu zero clip gate stage 2 by-var M 2 W 2: final weights sha256 aa1b37445adbfc1e269380a7a84ae4cb0b8a310558ca89c0dc723f714fe215c3 (clipped on 12 of 12 steps)
+cpu zero clip gate stage 3 by-var M 2 W 2: final weights sha256 aa1b37445adbfc1e269380a7a84ae4cb0b8a310558ca89c0dc723f714fe215c3 (clipped on 12 of 12 steps)
+cpu zero clip gate M 4 W 1: DDP final weights sha256 dae9d10a3171b13c08f938804a539f946fc93f88bd54895c403bcf2b7c452034
+cpu zero clip gate stage 1 flat M 4 W 1: final weights sha256 dae9d10a3171b13c08f938804a539f946fc93f88bd54895c403bcf2b7c452034 (clipped on 12 of 12 steps)
+cpu zero clip gate stage 2 flat M 4 W 1: final weights sha256 dae9d10a3171b13c08f938804a539f946fc93f88bd54895c403bcf2b7c452034 (clipped on 12 of 12 steps)
+cpu zero clip gate stage 3 flat M 4 W 1: final weights sha256 dae9d10a3171b13c08f938804a539f946fc93f88bd54895c403bcf2b7c452034 (clipped on 12 of 12 steps)
+cpu zero clip gate stage 1 by-var M 4 W 1: final weights sha256 dae9d10a3171b13c08f938804a539f946fc93f88bd54895c403bcf2b7c452034 (clipped on 12 of 12 steps)
+cpu zero clip gate stage 2 by-var M 4 W 1: final weights sha256 dae9d10a3171b13c08f938804a539f946fc93f88bd54895c403bcf2b7c452034 (clipped on 12 of 12 steps)
+cpu zero clip gate stage 3 by-var M 4 W 1: final weights sha256 dae9d10a3171b13c08f938804a539f946fc93f88bd54895c403bcf2b7c452034 (clipped on 12 of 12 steps)
+cpu zero clip gate M 4 W 2: DDP final weights sha256 dae9d10a3171b13c08f938804a539f946fc93f88bd54895c403bcf2b7c452034
+cpu zero clip gate stage 1 flat M 4 W 2: final weights sha256 dae9d10a3171b13c08f938804a539f946fc93f88bd54895c403bcf2b7c452034 (clipped on 12 of 12 steps)
+cpu zero clip gate stage 2 flat M 4 W 2: final weights sha256 dae9d10a3171b13c08f938804a539f946fc93f88bd54895c403bcf2b7c452034 (clipped on 12 of 12 steps)
+cpu zero clip gate stage 3 flat M 4 W 2: final weights sha256 dae9d10a3171b13c08f938804a539f946fc93f88bd54895c403bcf2b7c452034 (clipped on 12 of 12 steps)
+cpu zero clip gate stage 1 by-var M 4 W 2: final weights sha256 dae9d10a3171b13c08f938804a539f946fc93f88bd54895c403bcf2b7c452034 (clipped on 12 of 12 steps)
+cpu zero clip gate stage 2 by-var M 4 W 2: final weights sha256 dae9d10a3171b13c08f938804a539f946fc93f88bd54895c403bcf2b7c452034 (clipped on 12 of 12 steps)
+cpu zero clip gate stage 3 by-var M 4 W 2: final weights sha256 dae9d10a3171b13c08f938804a539f946fc93f88bd54895c403bcf2b7c452034 (clipped on 12 of 12 steps)
+cpu zero clip gate M 4 W 4: DDP final weights sha256 dae9d10a3171b13c08f938804a539f946fc93f88bd54895c403bcf2b7c452034
+cpu zero clip gate stage 1 flat M 4 W 4: final weights sha256 dae9d10a3171b13c08f938804a539f946fc93f88bd54895c403bcf2b7c452034 (clipped on 12 of 12 steps)
+cpu zero clip gate stage 2 flat M 4 W 4: final weights sha256 dae9d10a3171b13c08f938804a539f946fc93f88bd54895c403bcf2b7c452034 (clipped on 12 of 12 steps)
+cpu zero clip gate stage 3 flat M 4 W 4: final weights sha256 dae9d10a3171b13c08f938804a539f946fc93f88bd54895c403bcf2b7c452034 (clipped on 12 of 12 steps)
+cpu zero clip gate stage 1 by-var M 4 W 4: final weights sha256 dae9d10a3171b13c08f938804a539f946fc93f88bd54895c403bcf2b7c452034 (clipped on 12 of 12 steps)
+cpu zero clip gate stage 2 by-var M 4 W 4: final weights sha256 dae9d10a3171b13c08f938804a539f946fc93f88bd54895c403bcf2b7c452034 (clipped on 12 of 12 steps)
+cpu zero clip gate stage 3 by-var M 4 W 4: final weights sha256 dae9d10a3171b13c08f938804a539f946fc93f88bd54895c403bcf2b7c452034 (clipped on 12 of 12 steps)
+test nn::dist::tests::zero_tests::gate_zero_clipping_equals_data_parallelism ... ok
+cpu consolidated gate stage 1 flat W 2 adam: 17 files byte-identical to DDP's; last vars.json sha256 3b94e85f76b93c1c250415836e41b3afaf15c70294d4ac01c17550f2becae08b
+cpu consolidated gate stage 2 flat W 2 adam: 17 files byte-identical to DDP's; last vars.json sha256 3b94e85f76b93c1c250415836e41b3afaf15c70294d4ac01c17550f2becae08b
+cpu consolidated gate stage 3 flat W 2 adam: 17 files byte-identical to DDP's; last vars.json sha256 3b94e85f76b93c1c250415836e41b3afaf15c70294d4ac01c17550f2becae08b
+cpu consolidated gate stage 1 by-var W 2 adam: 17 files byte-identical to DDP's; last vars.json sha256 3b94e85f76b93c1c250415836e41b3afaf15c70294d4ac01c17550f2becae08b
+cpu consolidated gate stage 2 by-var W 2 adam: 17 files byte-identical to DDP's; last vars.json sha256 3b94e85f76b93c1c250415836e41b3afaf15c70294d4ac01c17550f2becae08b
+cpu consolidated gate stage 3 by-var W 2 adam: 17 files byte-identical to DDP's; last vars.json sha256 3b94e85f76b93c1c250415836e41b3afaf15c70294d4ac01c17550f2becae08b
+cpu consolidated gate stage 1 flat W 4 adam: 13 files byte-identical to DDP's; last vars.json sha256 968508fe80c79c35340ee7227044ca2242038d6b7884858c979950c2680ead83
+cpu consolidated gate stage 2 flat W 4 adam: 13 files byte-identical to DDP's; last vars.json sha256 968508fe80c79c35340ee7227044ca2242038d6b7884858c979950c2680ead83
+cpu consolidated gate stage 3 flat W 4 adam: 13 files byte-identical to DDP's; last vars.json sha256 968508fe80c79c35340ee7227044ca2242038d6b7884858c979950c2680ead83
+cpu consolidated gate stage 1 by-var W 4 adam: 13 files byte-identical to DDP's; last vars.json sha256 968508fe80c79c35340ee7227044ca2242038d6b7884858c979950c2680ead83
+cpu consolidated gate stage 2 by-var W 4 adam: 13 files byte-identical to DDP's; last vars.json sha256 968508fe80c79c35340ee7227044ca2242038d6b7884858c979950c2680ead83
+cpu consolidated gate stage 3 by-var W 4 adam: 13 files byte-identical to DDP's; last vars.json sha256 968508fe80c79c35340ee7227044ca2242038d6b7884858c979950c2680ead83
+cpu consolidated gate stage 1 flat W 2 sgd: 13 files byte-identical to DDP's; last vars.json sha256 2cff4c2a35d5ba1a70e9eed9b1f941174336d33d49675bc62dd9d1134c1454b2
+cpu consolidated gate stage 2 flat W 2 sgd: 13 files byte-identical to DDP's; last vars.json sha256 2cff4c2a35d5ba1a70e9eed9b1f941174336d33d49675bc62dd9d1134c1454b2
+cpu consolidated gate stage 3 flat W 2 sgd: 13 files byte-identical to DDP's; last vars.json sha256 2cff4c2a35d5ba1a70e9eed9b1f941174336d33d49675bc62dd9d1134c1454b2
+cpu consolidated gate stage 1 by-var W 2 sgd: 13 files byte-identical to DDP's; last vars.json sha256 2cff4c2a35d5ba1a70e9eed9b1f941174336d33d49675bc62dd9d1134c1454b2
+cpu consolidated gate stage 2 by-var W 2 sgd: 13 files byte-identical to DDP's; last vars.json sha256 2cff4c2a35d5ba1a70e9eed9b1f941174336d33d49675bc62dd9d1134c1454b2
+cpu consolidated gate stage 3 by-var W 2 sgd: 13 files byte-identical to DDP's; last vars.json sha256 2cff4c2a35d5ba1a70e9eed9b1f941174336d33d49675bc62dd9d1134c1454b2
+test nn::dist::tests::zero_tests::gate_zero_consolidated_checkpoints_are_data_parallelisms ... ok
+cpu zero gate M 2 W 1: DDP final weights sha256 3b94e85f76b93c1c250415836e41b3afaf15c70294d4ac01c17550f2becae08b
+cpu zero gate stage 1 flat M 2 W 1: final weights sha256 3b94e85f76b93c1c250415836e41b3afaf15c70294d4ac01c17550f2becae08b (0.1 s); memory ["params=175360 grads=175360 optimizer_state=350720"]
+cpu zero gate stage 2 flat M 2 W 1: final weights sha256 3b94e85f76b93c1c250415836e41b3afaf15c70294d4ac01c17550f2becae08b (0.1 s); memory ["params=175360 grads=175360 optimizer_state=350720"]
+cpu zero gate stage 3 flat M 2 W 1: final weights sha256 3b94e85f76b93c1c250415836e41b3afaf15c70294d4ac01c17550f2becae08b (0.2 s); memory ["params=175360 grads=175360 optimizer_state=350720"]
+cpu zero gate stage 1 by-var M 2 W 1: final weights sha256 3b94e85f76b93c1c250415836e41b3afaf15c70294d4ac01c17550f2becae08b (0.1 s); memory ["params=175360 grads=175360 optimizer_state=350720"]
+cpu zero gate stage 2 by-var M 2 W 1: final weights sha256 3b94e85f76b93c1c250415836e41b3afaf15c70294d4ac01c17550f2becae08b (0.1 s); memory ["params=175360 grads=175360 optimizer_state=350720"]
+cpu zero gate stage 3 by-var M 2 W 1: final weights sha256 3b94e85f76b93c1c250415836e41b3afaf15c70294d4ac01c17550f2becae08b (0.1 s); memory ["params=175360 grads=175360 optimizer_state=350720"]
+cpu zero gate M 2 W 2: DDP final weights sha256 3b94e85f76b93c1c250415836e41b3afaf15c70294d4ac01c17550f2becae08b
+cpu zero gate stage 1 flat M 2 W 2: final weights sha256 3b94e85f76b93c1c250415836e41b3afaf15c70294d4ac01c17550f2becae08b (0.2 s); memory ["params=175360 grads=175360 optimizer_state=175360", "params=175360 grads=175360 optimizer_state=175360"]
+cpu zero gate stage 2 flat M 2 W 2: final weights sha256 3b94e85f76b93c1c250415836e41b3afaf15c70294d4ac01c17550f2becae08b (0.2 s); memory ["params=175360 grads=87680 optimizer_state=175360", "params=175360 grads=87680 optimizer_state=175360"]
+cpu zero gate stage 3 flat M 2 W 2: final weights sha256 3b94e85f76b93c1c250415836e41b3afaf15c70294d4ac01c17550f2becae08b (0.2 s); memory ["params=87680 grads=87680 optimizer_state=175360", "params=87680 grads=87680 optimizer_state=175360"]
+cpu zero gate stage 1 by-var M 2 W 2: final weights sha256 3b94e85f76b93c1c250415836e41b3afaf15c70294d4ac01c17550f2becae08b (0.7 s); memory ["params=175360 grads=175360 optimizer_state=176128", "params=175360 grads=175360 optimizer_state=174592"]
+cpu zero gate stage 2 by-var M 2 W 2: final weights sha256 3b94e85f76b93c1c250415836e41b3afaf15c70294d4ac01c17550f2becae08b (0.2 s); memory ["params=175360 grads=88064 optimizer_state=176128", "params=175360 grads=87296 optimizer_state=174592"]
+cpu zero gate stage 3 by-var M 2 W 2: final weights sha256 3b94e85f76b93c1c250415836e41b3afaf15c70294d4ac01c17550f2becae08b (0.2 s); memory ["params=88064 grads=88064 optimizer_state=176128", "params=87296 grads=87296 optimizer_state=174592"]
+cpu zero gate M 4 W 1: DDP final weights sha256 968508fe80c79c35340ee7227044ca2242038d6b7884858c979950c2680ead83
+cpu zero gate stage 1 flat M 4 W 1: final weights sha256 968508fe80c79c35340ee7227044ca2242038d6b7884858c979950c2680ead83 (0.2 s); memory ["params=175360 grads=175360 optimizer_state=350720"]
+cpu zero gate stage 2 flat M 4 W 1: final weights sha256 968508fe80c79c35340ee7227044ca2242038d6b7884858c979950c2680ead83 (0.2 s); memory ["params=175360 grads=175360 optimizer_state=350720"]
+cpu zero gate stage 3 flat M 4 W 1: final weights sha256 968508fe80c79c35340ee7227044ca2242038d6b7884858c979950c2680ead83 (0.2 s); memory ["params=175360 grads=175360 optimizer_state=350720"]
+cpu zero gate stage 1 by-var M 4 W 1: final weights sha256 968508fe80c79c35340ee7227044ca2242038d6b7884858c979950c2680ead83 (0.2 s); memory ["params=175360 grads=175360 optimizer_state=350720"]
+cpu zero gate stage 2 by-var M 4 W 1: final weights sha256 968508fe80c79c35340ee7227044ca2242038d6b7884858c979950c2680ead83 (0.1 s); memory ["params=175360 grads=175360 optimizer_state=350720"]
+cpu zero gate stage 3 by-var M 4 W 1: final weights sha256 968508fe80c79c35340ee7227044ca2242038d6b7884858c979950c2680ead83 (0.2 s); memory ["params=175360 grads=175360 optimizer_state=350720"]
+cpu zero gate M 4 W 2: DDP final weights sha256 968508fe80c79c35340ee7227044ca2242038d6b7884858c979950c2680ead83
+cpu zero gate stage 1 flat M 4 W 2: final weights sha256 968508fe80c79c35340ee7227044ca2242038d6b7884858c979950c2680ead83 (0.2 s); memory ["params=175360 grads=175360 optimizer_state=175360", "params=175360 grads=175360 optimizer_state=175360"]
+cpu zero gate stage 2 flat M 4 W 2: final weights sha256 968508fe80c79c35340ee7227044ca2242038d6b7884858c979950c2680ead83 (0.2 s); memory ["params=175360 grads=87680 optimizer_state=175360", "params=175360 grads=87680 optimizer_state=175360"]
+cpu zero gate stage 3 flat M 4 W 2: final weights sha256 968508fe80c79c35340ee7227044ca2242038d6b7884858c979950c2680ead83 (0.2 s); memory ["params=87680 grads=87680 optimizer_state=175360", "params=87680 grads=87680 optimizer_state=175360"]
+cpu zero gate stage 1 by-var M 4 W 2: final weights sha256 968508fe80c79c35340ee7227044ca2242038d6b7884858c979950c2680ead83 (0.2 s); memory ["params=175360 grads=175360 optimizer_state=176128", "params=175360 grads=175360 optimizer_state=174592"]
+cpu zero gate stage 2 by-var M 4 W 2: final weights sha256 968508fe80c79c35340ee7227044ca2242038d6b7884858c979950c2680ead83 (0.2 s); memory ["params=175360 grads=88064 optimizer_state=176128", "params=175360 grads=87296 optimizer_state=174592"]
+cpu zero gate stage 3 by-var M 4 W 2: final weights sha256 968508fe80c79c35340ee7227044ca2242038d6b7884858c979950c2680ead83 (0.2 s); memory ["params=88064 grads=88064 optimizer_state=176128", "params=87296 grads=87296 optimizer_state=174592"]
+cpu zero gate M 4 W 4: DDP final weights sha256 968508fe80c79c35340ee7227044ca2242038d6b7884858c979950c2680ead83
+cpu zero gate stage 1 flat M 4 W 4: final weights sha256 968508fe80c79c35340ee7227044ca2242038d6b7884858c979950c2680ead83 (0.3 s); memory ["params=175360 grads=175360 optimizer_state=87680", "params=175360 grads=175360 optimizer_state=87680", "params=175360 grads=175360 optimizer_state=87680", "params=175360 grads=175360 optimizer_state=87680"]
+cpu zero gate stage 2 flat M 4 W 4: final weights sha256 968508fe80c79c35340ee7227044ca2242038d6b7884858c979950c2680ead83 (0.2 s); memory ["params=175360 grads=43840 optimizer_state=87680", "params=175360 grads=43840 optimizer_state=87680", "params=175360 grads=43840 optimizer_state=87680", "params=175360 grads=43840 optimizer_state=87680"]
+cpu zero gate stage 3 flat M 4 W 4: final weights sha256 968508fe80c79c35340ee7227044ca2242038d6b7884858c979950c2680ead83 (0.7 s); memory ["params=43840 grads=43840 optimizer_state=87680", "params=43840 grads=43840 optimizer_state=87680", "params=43840 grads=43840 optimizer_state=87680", "params=43840 grads=43840 optimizer_state=87680"]
+cpu zero gate stage 1 by-var M 4 W 4: final weights sha256 968508fe80c79c35340ee7227044ca2242038d6b7884858c979950c2680ead83 (0.2 s); memory ["params=175360 grads=175360 optimizer_state=90112", "params=175360 grads=175360 optimizer_state=90112", "params=175360 grads=175360 optimizer_state=86016", "params=175360 grads=175360 optimizer_state=84480"]
+cpu zero gate stage 2 by-var M 4 W 4: final weights sha256 968508fe80c79c35340ee7227044ca2242038d6b7884858c979950c2680ead83 (0.2 s); memory ["params=175360 grads=45056 optimizer_state=90112", "params=175360 grads=45056 optimizer_state=90112", "params=175360 grads=43008 optimizer_state=86016", "params=175360 grads=42240 optimizer_state=84480"]
+cpu zero gate stage 3 by-var M 4 W 4: final weights sha256 968508fe80c79c35340ee7227044ca2242038d6b7884858c979950c2680ead83 (0.2 s); memory ["params=45056 grads=45056 optimizer_state=90112", "params=45056 grads=45056 optimizer_state=90112", "params=43008 grads=43008 optimizer_state=86016", "params=42240 grads=42240 optimizer_state=84480"]
+test nn::dist::tests::zero_tests::gate_zero_every_stage_and_partition_equals_data_parallelism ... ok
+zero3-flat-w2-adam-killed: rank 1 killed at step 7: rank 1 failed (exit code: 1); the job was stopped
+cpu sharded resume zero3-flat-w2-adam: rank 1 killed at step 7; final weights sha256 3b94e85f76b93c1c250415836e41b3afaf15c70294d4ac01c17550f2becae08b (uninterrupted 3b94e85f76b93c1c250415836e41b3afaf15c70294d4ac01c17550f2becae08b)
+zero2-by-var-w2-sgd-killed: rank 1 killed at step 7: rank 1 failed (exit code: 1); the job was stopped
+cpu sharded resume zero2-by-var-w2-sgd: rank 1 killed at step 7; final weights sha256 2cff4c2a35d5ba1a70e9eed9b1f941174336d33d49675bc62dd9d1134c1454b2 (uninterrupted 2cff4c2a35d5ba1a70e9eed9b1f941174336d33d49675bc62dd9d1134c1454b2)
+zero1-flat-w4-adam-killed: rank 2 killed at step 5: rank 2 failed (exit code: 1); the job was stopped
+cpu sharded resume zero1-flat-w4-adam: rank 2 killed at step 5; final weights sha256 968508fe80c79c35340ee7227044ca2242038d6b7884858c979950c2680ead83 (uninterrupted 968508fe80c79c35340ee7227044ca2242038d6b7884858c979950c2680ead83)
+zero3-by-var-w4-adam-killed: rank 2 killed at step 5: rank 2 failed (exit code: 1); the job was stopped
+cpu sharded resume zero3-by-var-w4-adam: rank 2 killed at step 5; final weights sha256 968508fe80c79c35340ee7227044ca2242038d6b7884858c979950c2680ead83 (uninterrupted 968508fe80c79c35340ee7227044ca2242038d6b7884858c979950c2680ead83)
+test nn::dist::tests::zero_tests::gate_zero_kill_and_sharded_resume_equals_the_uninterrupted_run ... ok
+cuda zero absent gate stage 1 flat M 2 W 1: final weights sha256 ed14a6550cd5773878d04a6516ab7f3c5a9ab9df6768db24c6f7f8d0c907aa1c (one process with zeros ed14a6550cd5773878d04a6516ab7f3c5a9ab9df6768db24c6f7f8d0c907aa1c)
+cuda zero absent gate stage 1 flat M 2 W 2: final weights sha256 ed14a6550cd5773878d04a6516ab7f3c5a9ab9df6768db24c6f7f8d0c907aa1c (one process with zeros ed14a6550cd5773878d04a6516ab7f3c5a9ab9df6768db24c6f7f8d0c907aa1c)
+cuda zero absent gate stage 2 by-var M 2 W 1: final weights sha256 ed14a6550cd5773878d04a6516ab7f3c5a9ab9df6768db24c6f7f8d0c907aa1c (one process with zeros ed14a6550cd5773878d04a6516ab7f3c5a9ab9df6768db24c6f7f8d0c907aa1c)
+cuda zero absent gate stage 2 by-var M 2 W 2: final weights sha256 ed14a6550cd5773878d04a6516ab7f3c5a9ab9df6768db24c6f7f8d0c907aa1c (one process with zeros ed14a6550cd5773878d04a6516ab7f3c5a9ab9df6768db24c6f7f8d0c907aa1c)
+cuda zero absent gate stage 3 flat M 2 W 1: final weights sha256 ed14a6550cd5773878d04a6516ab7f3c5a9ab9df6768db24c6f7f8d0c907aa1c (one process with zeros ed14a6550cd5773878d04a6516ab7f3c5a9ab9df6768db24c6f7f8d0c907aa1c)
+cuda zero absent gate stage 3 flat M 2 W 2: final weights sha256 ed14a6550cd5773878d04a6516ab7f3c5a9ab9df6768db24c6f7f8d0c907aa1c (one process with zeros ed14a6550cd5773878d04a6516ab7f3c5a9ab9df6768db24c6f7f8d0c907aa1c)
+cuda zero absent gate stage 1 flat M 4 W 1: final weights sha256 5bae8705a1f990ecfdbae8f8f19619b914347bdd753de2d0fb092cfc29ff6f60 (one process with zeros 5bae8705a1f990ecfdbae8f8f19619b914347bdd753de2d0fb092cfc29ff6f60)
+cuda zero absent gate stage 1 flat M 4 W 2: final weights sha256 5bae8705a1f990ecfdbae8f8f19619b914347bdd753de2d0fb092cfc29ff6f60 (one process with zeros 5bae8705a1f990ecfdbae8f8f19619b914347bdd753de2d0fb092cfc29ff6f60)
+cuda zero absent gate stage 1 flat M 4 W 4: final weights sha256 5bae8705a1f990ecfdbae8f8f19619b914347bdd753de2d0fb092cfc29ff6f60 (one process with zeros 5bae8705a1f990ecfdbae8f8f19619b914347bdd753de2d0fb092cfc29ff6f60)
+cuda zero absent gate stage 2 by-var M 4 W 1: final weights sha256 5bae8705a1f990ecfdbae8f8f19619b914347bdd753de2d0fb092cfc29ff6f60 (one process with zeros 5bae8705a1f990ecfdbae8f8f19619b914347bdd753de2d0fb092cfc29ff6f60)
+cuda zero absent gate stage 2 by-var M 4 W 2: final weights sha256 5bae8705a1f990ecfdbae8f8f19619b914347bdd753de2d0fb092cfc29ff6f60 (one process with zeros 5bae8705a1f990ecfdbae8f8f19619b914347bdd753de2d0fb092cfc29ff6f60)
+cuda zero absent gate stage 2 by-var M 4 W 4: final weights sha256 5bae8705a1f990ecfdbae8f8f19619b914347bdd753de2d0fb092cfc29ff6f60 (one process with zeros 5bae8705a1f990ecfdbae8f8f19619b914347bdd753de2d0fb092cfc29ff6f60)
+cuda zero absent gate stage 3 flat M 4 W 1: final weights sha256 5bae8705a1f990ecfdbae8f8f19619b914347bdd753de2d0fb092cfc29ff6f60 (one process with zeros 5bae8705a1f990ecfdbae8f8f19619b914347bdd753de2d0fb092cfc29ff6f60)
+cuda zero absent gate stage 3 flat M 4 W 2: final weights sha256 5bae8705a1f990ecfdbae8f8f19619b914347bdd753de2d0fb092cfc29ff6f60 (one process with zeros 5bae8705a1f990ecfdbae8f8f19619b914347bdd753de2d0fb092cfc29ff6f60)
+cuda zero absent gate stage 3 flat M 4 W 4: final weights sha256 5bae8705a1f990ecfdbae8f8f19619b914347bdd753de2d0fb092cfc29ff6f60 (one process with zeros 5bae8705a1f990ecfdbae8f8f19619b914347bdd753de2d0fb092cfc29ff6f60)
+cuda zero idle gate after stage 1 flat W 1: final weights sha256 54f777084d76890aa834b87be8c76a77a5861386c125d901935e3e0fdcf7bc2f (one process 54f777084d76890aa834b87be8c76a77a5861386c125d901935e3e0fdcf7bc2f)
+cuda zero idle gate after stage 1 flat W 2: final weights sha256 54f777084d76890aa834b87be8c76a77a5861386c125d901935e3e0fdcf7bc2f (one process 54f777084d76890aa834b87be8c76a77a5861386c125d901935e3e0fdcf7bc2f)
+cuda zero idle gate after stage 1 flat W 4: final weights sha256 54f777084d76890aa834b87be8c76a77a5861386c125d901935e3e0fdcf7bc2f (one process 54f777084d76890aa834b87be8c76a77a5861386c125d901935e3e0fdcf7bc2f)
+cuda zero idle gate after stage 2 by-var W 1: final weights sha256 54f777084d76890aa834b87be8c76a77a5861386c125d901935e3e0fdcf7bc2f (one process 54f777084d76890aa834b87be8c76a77a5861386c125d901935e3e0fdcf7bc2f)
+cuda zero idle gate after stage 2 by-var W 2: final weights sha256 54f777084d76890aa834b87be8c76a77a5861386c125d901935e3e0fdcf7bc2f (one process 54f777084d76890aa834b87be8c76a77a5861386c125d901935e3e0fdcf7bc2f)
+cuda zero idle gate after stage 2 by-var W 4: final weights sha256 54f777084d76890aa834b87be8c76a77a5861386c125d901935e3e0fdcf7bc2f (one process 54f777084d76890aa834b87be8c76a77a5861386c125d901935e3e0fdcf7bc2f)
+cuda zero idle gate after stage 3 flat W 1: final weights sha256 54f777084d76890aa834b87be8c76a77a5861386c125d901935e3e0fdcf7bc2f (one process 54f777084d76890aa834b87be8c76a77a5861386c125d901935e3e0fdcf7bc2f)
+cuda zero idle gate after stage 3 flat W 2: final weights sha256 54f777084d76890aa834b87be8c76a77a5861386c125d901935e3e0fdcf7bc2f (one process 54f777084d76890aa834b87be8c76a77a5861386c125d901935e3e0fdcf7bc2f)
+cuda zero idle gate after stage 3 flat W 4: final weights sha256 54f777084d76890aa834b87be8c76a77a5861386c125d901935e3e0fdcf7bc2f (one process 54f777084d76890aa834b87be8c76a77a5861386c125d901935e3e0fdcf7bc2f)
+cuda zero idle gate torch stage 1 flat W 1: final weights sha256 136006461c91ed08f4845a58562cc4c5a433fb40507c805f593c6d8f76d33da0 (one process 136006461c91ed08f4845a58562cc4c5a433fb40507c805f593c6d8f76d33da0)
+cuda zero idle gate torch stage 1 flat W 2: final weights sha256 136006461c91ed08f4845a58562cc4c5a433fb40507c805f593c6d8f76d33da0 (one process 136006461c91ed08f4845a58562cc4c5a433fb40507c805f593c6d8f76d33da0)
+cuda zero idle gate torch stage 1 flat W 4: final weights sha256 136006461c91ed08f4845a58562cc4c5a433fb40507c805f593c6d8f76d33da0 (one process 136006461c91ed08f4845a58562cc4c5a433fb40507c805f593c6d8f76d33da0)
+cuda zero idle gate torch stage 2 by-var W 1: final weights sha256 136006461c91ed08f4845a58562cc4c5a433fb40507c805f593c6d8f76d33da0 (one process 136006461c91ed08f4845a58562cc4c5a433fb40507c805f593c6d8f76d33da0)
+cuda zero idle gate torch stage 2 by-var W 2: final weights sha256 136006461c91ed08f4845a58562cc4c5a433fb40507c805f593c6d8f76d33da0 (one process 136006461c91ed08f4845a58562cc4c5a433fb40507c805f593c6d8f76d33da0)
+cuda zero idle gate torch stage 2 by-var W 4: final weights sha256 136006461c91ed08f4845a58562cc4c5a433fb40507c805f593c6d8f76d33da0 (one process 136006461c91ed08f4845a58562cc4c5a433fb40507c805f593c6d8f76d33da0)
+cuda zero idle gate torch stage 3 flat W 1: final weights sha256 136006461c91ed08f4845a58562cc4c5a433fb40507c805f593c6d8f76d33da0 (one process 136006461c91ed08f4845a58562cc4c5a433fb40507c805f593c6d8f76d33da0)
+cuda zero idle gate torch stage 3 flat W 2: final weights sha256 136006461c91ed08f4845a58562cc4c5a433fb40507c805f593c6d8f76d33da0 (one process 136006461c91ed08f4845a58562cc4c5a433fb40507c805f593c6d8f76d33da0)
+cuda zero idle gate torch stage 3 flat W 4: final weights sha256 136006461c91ed08f4845a58562cc4c5a433fb40507c805f593c6d8f76d33da0 (one process 136006461c91ed08f4845a58562cc4c5a433fb40507c805f593c6d8f76d33da0)
+test nn::dist::tests::zero_tests::gpu_gate_zero_absent_gradients_and_an_idle_weight_equal_one_gpu ... ok
+cuda zero clip gate M 2 W 1: DDP final weights sha256 d481ddb36d6a9c3f1a169e67d6eda1d1b6fa6a93edd3944a4d1edf30f30de873
+cuda zero clip gate stage 1 flat M 2 W 1: final weights sha256 d481ddb36d6a9c3f1a169e67d6eda1d1b6fa6a93edd3944a4d1edf30f30de873 (clipped on 12 of 12 steps)
+cuda zero clip gate stage 2 by-var M 2 W 1: final weights sha256 d481ddb36d6a9c3f1a169e67d6eda1d1b6fa6a93edd3944a4d1edf30f30de873 (clipped on 12 of 12 steps)
+cuda zero clip gate stage 3 flat M 2 W 1: final weights sha256 d481ddb36d6a9c3f1a169e67d6eda1d1b6fa6a93edd3944a4d1edf30f30de873 (clipped on 12 of 12 steps)
+cuda zero clip gate M 2 W 2: DDP final weights sha256 d481ddb36d6a9c3f1a169e67d6eda1d1b6fa6a93edd3944a4d1edf30f30de873
+cuda zero clip gate stage 1 flat M 2 W 2: final weights sha256 d481ddb36d6a9c3f1a169e67d6eda1d1b6fa6a93edd3944a4d1edf30f30de873 (clipped on 12 of 12 steps)
+cuda zero clip gate stage 2 by-var M 2 W 2: final weights sha256 d481ddb36d6a9c3f1a169e67d6eda1d1b6fa6a93edd3944a4d1edf30f30de873 (clipped on 12 of 12 steps)
+cuda zero clip gate stage 3 flat M 2 W 2: final weights sha256 d481ddb36d6a9c3f1a169e67d6eda1d1b6fa6a93edd3944a4d1edf30f30de873 (clipped on 12 of 12 steps)
+cuda zero clip gate M 4 W 1: DDP final weights sha256 561ebc59ea9cce995956425c60e59b15d3a1049428987ffb115ab00589ff93e3
+cuda zero clip gate stage 1 flat M 4 W 1: final weights sha256 561ebc59ea9cce995956425c60e59b15d3a1049428987ffb115ab00589ff93e3 (clipped on 12 of 12 steps)
+cuda zero clip gate stage 2 by-var M 4 W 1: final weights sha256 561ebc59ea9cce995956425c60e59b15d3a1049428987ffb115ab00589ff93e3 (clipped on 12 of 12 steps)
+cuda zero clip gate stage 3 flat M 4 W 1: final weights sha256 561ebc59ea9cce995956425c60e59b15d3a1049428987ffb115ab00589ff93e3 (clipped on 12 of 12 steps)
+cuda zero clip gate M 4 W 2: DDP final weights sha256 561ebc59ea9cce995956425c60e59b15d3a1049428987ffb115ab00589ff93e3
+cuda zero clip gate stage 1 flat M 4 W 2: final weights sha256 561ebc59ea9cce995956425c60e59b15d3a1049428987ffb115ab00589ff93e3 (clipped on 12 of 12 steps)
+cuda zero clip gate stage 2 by-var M 4 W 2: final weights sha256 561ebc59ea9cce995956425c60e59b15d3a1049428987ffb115ab00589ff93e3 (clipped on 12 of 12 steps)
+cuda zero clip gate stage 3 flat M 4 W 2: final weights sha256 561ebc59ea9cce995956425c60e59b15d3a1049428987ffb115ab00589ff93e3 (clipped on 12 of 12 steps)
+cuda zero clip gate M 4 W 4: DDP final weights sha256 561ebc59ea9cce995956425c60e59b15d3a1049428987ffb115ab00589ff93e3
+cuda zero clip gate stage 1 flat M 4 W 4: final weights sha256 561ebc59ea9cce995956425c60e59b15d3a1049428987ffb115ab00589ff93e3 (clipped on 12 of 12 steps)
+cuda zero clip gate stage 2 by-var M 4 W 4: final weights sha256 561ebc59ea9cce995956425c60e59b15d3a1049428987ffb115ab00589ff93e3 (clipped on 12 of 12 steps)
+cuda zero clip gate stage 3 flat M 4 W 4: final weights sha256 561ebc59ea9cce995956425c60e59b15d3a1049428987ffb115ab00589ff93e3 (clipped on 12 of 12 steps)
+test nn::dist::tests::zero_tests::gpu_gate_zero_clipping_equals_data_parallelism ... ok
+cuda consolidated gate stage 1 flat W 2 adam: 17 files byte-identical to DDP's; last vars.json sha256 3263b99095eded48b1d0cc9c69d2492b56d9dfe38573ed35f797a6132339ff49
+cuda consolidated gate stage 2 by-var W 2 adam: 17 files byte-identical to DDP's; last vars.json sha256 3263b99095eded48b1d0cc9c69d2492b56d9dfe38573ed35f797a6132339ff49
+cuda consolidated gate stage 3 flat W 2 adam: 17 files byte-identical to DDP's; last vars.json sha256 3263b99095eded48b1d0cc9c69d2492b56d9dfe38573ed35f797a6132339ff49
+cuda consolidated gate stage 1 flat W 4 adam: 13 files byte-identical to DDP's; last vars.json sha256 4021208e74c5970b4ba0399cda524de9c497856635ab4a673066ebee72965d04
+cuda consolidated gate stage 2 by-var W 4 adam: 13 files byte-identical to DDP's; last vars.json sha256 4021208e74c5970b4ba0399cda524de9c497856635ab4a673066ebee72965d04
+cuda consolidated gate stage 3 flat W 4 adam: 13 files byte-identical to DDP's; last vars.json sha256 4021208e74c5970b4ba0399cda524de9c497856635ab4a673066ebee72965d04
+cuda consolidated gate stage 1 flat W 2 sgd: 13 files byte-identical to DDP's; last vars.json sha256 7650ce860e8db697d96e771ece5d20fca65c534d33353d6cc31fcb1ebf18d39c
+cuda consolidated gate stage 2 by-var W 2 sgd: 13 files byte-identical to DDP's; last vars.json sha256 7650ce860e8db697d96e771ece5d20fca65c534d33353d6cc31fcb1ebf18d39c
+cuda consolidated gate stage 3 flat W 2 sgd: 13 files byte-identical to DDP's; last vars.json sha256 7650ce860e8db697d96e771ece5d20fca65c534d33353d6cc31fcb1ebf18d39c
+test nn::dist::tests::zero_tests::gpu_gate_zero_consolidated_checkpoints_are_data_parallelisms ... ok
+cuda zero gate M 2 W 1: DDP final weights sha256 3263b99095eded48b1d0cc9c69d2492b56d9dfe38573ed35f797a6132339ff49
+cuda zero gate stage 1 flat M 2 W 1: final weights sha256 3263b99095eded48b1d0cc9c69d2492b56d9dfe38573ed35f797a6132339ff49 (1.1 s); memory ["params=175360 grads=175360 optimizer_state=350720"]
+cuda zero gate stage 2 flat M 2 W 1: final weights sha256 3263b99095eded48b1d0cc9c69d2492b56d9dfe38573ed35f797a6132339ff49 (1.2 s); memory ["params=175360 grads=175360 optimizer_state=350720"]
+cuda zero gate stage 3 flat M 2 W 1: final weights sha256 3263b99095eded48b1d0cc9c69d2492b56d9dfe38573ed35f797a6132339ff49 (1.0 s); memory ["params=175360 grads=175360 optimizer_state=350720"]
+cuda zero gate stage 1 by-var M 2 W 1: final weights sha256 3263b99095eded48b1d0cc9c69d2492b56d9dfe38573ed35f797a6132339ff49 (1.0 s); memory ["params=175360 grads=175360 optimizer_state=350720"]
+cuda zero gate stage 2 by-var M 2 W 1: final weights sha256 3263b99095eded48b1d0cc9c69d2492b56d9dfe38573ed35f797a6132339ff49 (1.0 s); memory ["params=175360 grads=175360 optimizer_state=350720"]
+cuda zero gate stage 3 by-var M 2 W 1: final weights sha256 3263b99095eded48b1d0cc9c69d2492b56d9dfe38573ed35f797a6132339ff49 (1.0 s); memory ["params=175360 grads=175360 optimizer_state=350720"]
+cuda zero gate M 2 W 2: DDP final weights sha256 3263b99095eded48b1d0cc9c69d2492b56d9dfe38573ed35f797a6132339ff49
+cuda zero gate stage 1 flat M 2 W 2: final weights sha256 3263b99095eded48b1d0cc9c69d2492b56d9dfe38573ed35f797a6132339ff49 (1.6 s); memory ["params=175360 grads=175360 optimizer_state=175360", "params=175360 grads=175360 optimizer_state=175360"]
+cuda zero gate stage 2 flat M 2 W 2: final weights sha256 3263b99095eded48b1d0cc9c69d2492b56d9dfe38573ed35f797a6132339ff49 (1.6 s); memory ["params=175360 grads=87680 optimizer_state=175360", "params=175360 grads=87680 optimizer_state=175360"]
+cuda zero gate stage 3 flat M 2 W 2: final weights sha256 3263b99095eded48b1d0cc9c69d2492b56d9dfe38573ed35f797a6132339ff49 (1.6 s); memory ["params=87680 grads=87680 optimizer_state=175360", "params=87680 grads=87680 optimizer_state=175360"]
+cuda zero gate stage 1 by-var M 2 W 2: final weights sha256 3263b99095eded48b1d0cc9c69d2492b56d9dfe38573ed35f797a6132339ff49 (1.0 s); memory ["params=175360 grads=175360 optimizer_state=176128", "params=175360 grads=175360 optimizer_state=174592"]
+cuda zero gate stage 2 by-var M 2 W 2: final weights sha256 3263b99095eded48b1d0cc9c69d2492b56d9dfe38573ed35f797a6132339ff49 (1.5 s); memory ["params=175360 grads=88064 optimizer_state=176128", "params=175360 grads=87296 optimizer_state=174592"]
+cuda zero gate stage 3 by-var M 2 W 2: final weights sha256 3263b99095eded48b1d0cc9c69d2492b56d9dfe38573ed35f797a6132339ff49 (1.1 s); memory ["params=88064 grads=88064 optimizer_state=176128", "params=87296 grads=87296 optimizer_state=174592"]
+cuda zero gate M 4 W 1: DDP final weights sha256 4021208e74c5970b4ba0399cda524de9c497856635ab4a673066ebee72965d04
+cuda zero gate stage 1 flat M 4 W 1: final weights sha256 4021208e74c5970b4ba0399cda524de9c497856635ab4a673066ebee72965d04 (1.1 s); memory ["params=175360 grads=175360 optimizer_state=350720"]
+cuda zero gate stage 2 flat M 4 W 1: final weights sha256 4021208e74c5970b4ba0399cda524de9c497856635ab4a673066ebee72965d04 (1.1 s); memory ["params=175360 grads=175360 optimizer_state=350720"]
+cuda zero gate stage 3 flat M 4 W 1: final weights sha256 4021208e74c5970b4ba0399cda524de9c497856635ab4a673066ebee72965d04 (1.1 s); memory ["params=175360 grads=175360 optimizer_state=350720"]
+cuda zero gate stage 1 by-var M 4 W 1: final weights sha256 4021208e74c5970b4ba0399cda524de9c497856635ab4a673066ebee72965d04 (1.1 s); memory ["params=175360 grads=175360 optimizer_state=350720"]
+cuda zero gate stage 2 by-var M 4 W 1: final weights sha256 4021208e74c5970b4ba0399cda524de9c497856635ab4a673066ebee72965d04 (1.1 s); memory ["params=175360 grads=175360 optimizer_state=350720"]
+cuda zero gate stage 3 by-var M 4 W 1: final weights sha256 4021208e74c5970b4ba0399cda524de9c497856635ab4a673066ebee72965d04 (1.1 s); memory ["params=175360 grads=175360 optimizer_state=350720"]
+cuda zero gate M 4 W 2: DDP final weights sha256 4021208e74c5970b4ba0399cda524de9c497856635ab4a673066ebee72965d04
+cuda zero gate stage 1 flat M 4 W 2: final weights sha256 4021208e74c5970b4ba0399cda524de9c497856635ab4a673066ebee72965d04 (1.2 s); memory ["params=175360 grads=175360 optimizer_state=175360", "params=175360 grads=175360 optimizer_state=175360"]
+cuda zero gate stage 2 flat M 4 W 2: final weights sha256 4021208e74c5970b4ba0399cda524de9c497856635ab4a673066ebee72965d04 (1.2 s); memory ["params=175360 grads=87680 optimizer_state=175360", "params=175360 grads=87680 optimizer_state=175360"]
+cuda zero gate stage 3 flat M 4 W 2: final weights sha256 4021208e74c5970b4ba0399cda524de9c497856635ab4a673066ebee72965d04 (1.7 s); memory ["params=87680 grads=87680 optimizer_state=175360", "params=87680 grads=87680 optimizer_state=175360"]
+cuda zero gate stage 1 by-var M 4 W 2: final weights sha256 4021208e74c5970b4ba0399cda524de9c497856635ab4a673066ebee72965d04 (1.2 s); memory ["params=175360 grads=175360 optimizer_state=176128", "params=175360 grads=175360 optimizer_state=174592"]
+cuda zero gate stage 2 by-var M 4 W 2: final weights sha256 4021208e74c5970b4ba0399cda524de9c497856635ab4a673066ebee72965d04 (1.2 s); memory ["params=175360 grads=88064 optimizer_state=176128", "params=175360 grads=87296 optimizer_state=174592"]
+cuda zero gate stage 3 by-var M 4 W 2: final weights sha256 4021208e74c5970b4ba0399cda524de9c497856635ab4a673066ebee72965d04 (1.2 s); memory ["params=88064 grads=88064 optimizer_state=176128", "params=87296 grads=87296 optimizer_state=174592"]
+cuda zero gate M 4 W 4: DDP final weights sha256 4021208e74c5970b4ba0399cda524de9c497856635ab4a673066ebee72965d04
+cuda zero gate stage 1 flat M 4 W 4: final weights sha256 4021208e74c5970b4ba0399cda524de9c497856635ab4a673066ebee72965d04 (2.0 s); memory ["params=175360 grads=175360 optimizer_state=87680", "params=175360 grads=175360 optimizer_state=87680", "params=175360 grads=175360 optimizer_state=87680", "params=175360 grads=175360 optimizer_state=87680"]
+cuda zero gate stage 2 flat M 4 W 4: final weights sha256 4021208e74c5970b4ba0399cda524de9c497856635ab4a673066ebee72965d04 (1.6 s); memory ["params=175360 grads=43840 optimizer_state=87680", "params=175360 grads=43840 optimizer_state=87680", "params=175360 grads=43840 optimizer_state=87680", "params=175360 grads=43840 optimizer_state=87680"]
+cuda zero gate stage 3 flat M 4 W 4: final weights sha256 4021208e74c5970b4ba0399cda524de9c497856635ab4a673066ebee72965d04 (2.0 s); memory ["params=43840 grads=43840 optimizer_state=87680", "params=43840 grads=43840 optimizer_state=87680", "params=43840 grads=43840 optimizer_state=87680", "params=43840 grads=43840 optimizer_state=87680"]
+cuda zero gate stage 1 by-var M 4 W 4: final weights sha256 4021208e74c5970b4ba0399cda524de9c497856635ab4a673066ebee72965d04 (1.8 s); memory ["params=175360 grads=175360 optimizer_state=90112", "params=175360 grads=175360 optimizer_state=90112", "params=175360 grads=175360 optimizer_state=86016", "params=175360 grads=175360 optimizer_state=84480"]
+cuda zero gate stage 2 by-var M 4 W 4: final weights sha256 4021208e74c5970b4ba0399cda524de9c497856635ab4a673066ebee72965d04 (1.9 s); memory ["params=175360 grads=45056 optimizer_state=90112", "params=175360 grads=45056 optimizer_state=90112", "params=175360 grads=43008 optimizer_state=86016", "params=175360 grads=42240 optimizer_state=84480"]
+cuda zero gate stage 3 by-var M 4 W 4: final weights sha256 4021208e74c5970b4ba0399cda524de9c497856635ab4a673066ebee72965d04 (1.9 s); memory ["params=45056 grads=45056 optimizer_state=90112", "params=45056 grads=45056 optimizer_state=90112", "params=43008 grads=43008 optimizer_state=86016", "params=42240 grads=42240 optimizer_state=84480"]
+test nn::dist::tests::zero_tests::gpu_gate_zero_every_stage_and_partition_equals_data_parallelism ... ok
+zero3-flat-w2-adam-killed: rank 1 killed at step 7: rank 1 failed (exit code: 1); the job was stopped
+cuda sharded resume zero3-flat-w2-adam: rank 1 killed at step 7; final weights sha256 3263b99095eded48b1d0cc9c69d2492b56d9dfe38573ed35f797a6132339ff49 (uninterrupted 3263b99095eded48b1d0cc9c69d2492b56d9dfe38573ed35f797a6132339ff49)
+zero2-by-var-w2-sgd-killed: rank 1 killed at step 7: rank 1 failed (exit code: 1); the job was stopped
+cuda sharded resume zero2-by-var-w2-sgd: rank 1 killed at step 7; final weights sha256 7650ce860e8db697d96e771ece5d20fca65c534d33353d6cc31fcb1ebf18d39c (uninterrupted 7650ce860e8db697d96e771ece5d20fca65c534d33353d6cc31fcb1ebf18d39c)
+zero1-flat-w4-adam-killed: rank 2 killed at step 5: rank 2 failed (exit code: 1); the job was stopped
+cuda sharded resume zero1-flat-w4-adam: rank 2 killed at step 5; final weights sha256 4021208e74c5970b4ba0399cda524de9c497856635ab4a673066ebee72965d04 (uninterrupted 4021208e74c5970b4ba0399cda524de9c497856635ab4a673066ebee72965d04)
+test nn::dist::tests::zero_tests::gpu_gate_zero_kill_and_sharded_resume_equals_the_uninterrupted_run ... ok
+test nn::dist::tests::zero_tests::sharded_clipping_equals_clipping_the_whole_sum ... ok
+test nn::dist::tests::zero_tests::sharded_steps_equal_data_parallel_steps_in_one_process ... ok
+memory DDP (every rank): params=175360 grads=175360 optimizer_state=350720
+memory stage 1 flat W 1: per rank params=[175360] grads=[175360] optimizer_state=[350720] (largest rank 1.000 of DDP's optimizer state)
+memory stage 1 flat W 2: per rank params=[175360, 175360] grads=[175360, 175360] optimizer_state=[175360, 175360] (largest rank 0.500 of DDP's optimizer state)
+memory stage 1 flat W 4: per rank params=[175360, 175360, 175360, 175360] grads=[175360, 175360, 175360, 175360] optimizer_state=[87680, 87680, 87680, 87680] (largest rank 0.250 of DDP's optimizer state)
+memory stage 2 flat W 1: per rank params=[175360] grads=[175360] optimizer_state=[350720] (largest rank 1.000 of DDP's optimizer state)
+memory stage 2 flat W 2: per rank params=[175360, 175360] grads=[87680, 87680] optimizer_state=[175360, 175360] (largest rank 0.500 of DDP's optimizer state)
+memory stage 2 flat W 4: per rank params=[175360, 175360, 175360, 175360] grads=[43840, 43840, 43840, 43840] optimizer_state=[87680, 87680, 87680, 87680] (largest rank 0.250 of DDP's optimizer state)
+memory stage 3 flat W 1: per rank params=[175360] grads=[175360] optimizer_state=[350720] (largest rank 1.000 of DDP's optimizer state)
+memory stage 3 flat W 2: per rank params=[87680, 87680] grads=[87680, 87680] optimizer_state=[175360, 175360] (largest rank 0.500 of DDP's optimizer state)
+memory stage 3 flat W 4: per rank params=[43840, 43840, 43840, 43840] grads=[43840, 43840, 43840, 43840] optimizer_state=[87680, 87680, 87680, 87680] (largest rank 0.250 of DDP's optimizer state)
+memory stage 1 by-var W 1: per rank params=[175360] grads=[175360] optimizer_state=[350720] (largest rank 1.000 of DDP's optimizer state)
+memory stage 1 by-var W 2: per rank params=[175360, 175360] grads=[175360, 175360] optimizer_state=[176128, 174592] (largest rank 0.502 of DDP's optimizer state)
+memory stage 1 by-var W 4: per rank params=[175360, 175360, 175360, 175360] grads=[175360, 175360, 175360, 175360] optimizer_state=[90112, 90112, 86016, 84480] (largest rank 0.257 of DDP's optimizer state)
+memory stage 2 by-var W 1: per rank params=[175360] grads=[175360] optimizer_state=[350720] (largest rank 1.000 of DDP's optimizer state)
+memory stage 2 by-var W 2: per rank params=[175360, 175360] grads=[88064, 87296] optimizer_state=[176128, 174592] (largest rank 0.502 of DDP's optimizer state)
+memory stage 2 by-var W 4: per rank params=[175360, 175360, 175360, 175360] grads=[45056, 45056, 43008, 42240] optimizer_state=[90112, 90112, 86016, 84480] (largest rank 0.257 of DDP's optimizer state)
+memory stage 3 by-var W 1: per rank params=[175360] grads=[175360] optimizer_state=[350720] (largest rank 1.000 of DDP's optimizer state)
+memory stage 3 by-var W 2: per rank params=[88064, 87296] grads=[88064, 87296] optimizer_state=[176128, 174592] (largest rank 0.502 of DDP's optimizer state)
+memory stage 3 by-var W 4: per rank params=[45056, 45056, 43008, 42240] grads=[45056, 45056, 43008, 42240] optimizer_state=[90112, 90112, 86016, 84480] (largest rank 0.257 of DDP's optimizer state)
+test nn::dist::tests::zero_tests::sharding_divides_the_optimizer_state_gradients_and_vars ... ok
+test nn::dist::tests::zero_tests::sharding_refuses_what_its_pieces_cannot_hold ... ok
+test nn::dist::tests::zero_tests::the_layout_covers_every_element_once_in_rank_order ... ok
+test nn::dist::tests::zero_tests::the_reduce_scatter_is_the_all_reduce_cut_into_pieces ... ok
+
+test result: ok. 60 passed; 0 failed; 5 ignored; 0 measured; 143 filtered out; finished in 270.81s
+
+# exit 0

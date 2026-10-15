@@ -1,0 +1,76 @@
+# E2 single-device differential, win: the reference tree against this tree
+# rustc 1.94.1; Windows 10.0.26300.0 x86_64; 2026-10-15T02:00:47.2275449+03:00
+## cpu, reference
+decoder adamw: vars c656bf57a256cfa38a87d3001024fcc7e32e81eb14067f6868dfa869261eac6d logits 279b9c1c1ec43b5d6402e51a0f14e495a336703120e77bf9dc0f3ce21fb1705b losses 3bd05493c994ff206d036948c105bfec70ea11bd0048d794adb61e751e52413b
+decoder sgd: vars 60a715ebd763b8350cf2a52c082652e31b40435596ea05be8cd70b94e2097cb8 logits 95f20649f149789796b1d0db290eff1b42b368f371d7340392b80fe76fa21e60 losses cd83b2da4b9dff6d62fe7612edb348205c215a03f1a6d85c2d695aebe204c224
+moe adamw: vars e992d79395f9bb70948e881f418756d9ca730338eb8dc6ddd940161d420bf438 logits bd505c599d48896d9d76489c69eea6f1a6de76afabf6c08a1a0949fe348da9d7 losses cb0819155e879d28b66ea7944d2a479935a3ac55a89aac7cbcbd414d3171ecdc
+moe sgd: vars 21247533cee9fbb2f344d948a19df155d77c1bec3d0aadf08624eac99c0da780 logits 0dfd8c4748e682e127ee014fcae80e3d69804b7ba308c062289aacc290adcff9 losses d28b0450fcc0a85b5f3cf6327dcc90fd86319a8bf5c189631e5b4c8146a6c50e
+dropout adamw: vars 8777c083964ce3f260d2c55af55a64de38b7ff645419daf95815ff59dcda109d logits 1bbea5928e25cd2198da53ca62cf1b26d39b1e45fd8b41a29e18bc1c9f0f5ba4 losses 9bbbb9ac864283bbde2d0589f9f3362f484ee6e34b362b5cc22aee532a4a3220
+dropout sgd: vars 45aaf45a4de30acd520d962f088f8a838a4a16919a8f9b9a652231e7271ed415 logits 3e224798adfb99d34d6a257079e87bf83aa13d4fe8b39d484518ae642ddd62e1 losses ca3fb72561b0add93184ea5d74df7385c3884020e815f7479301db53fc8f63c9
+copy_task:
+28032 parameters per model, 4 models, on Cpu(Reference)
+step   0: answer loss per model [3.317, 3.121, 3.316, 3.480]
+step  50: answer loss per model [0.124, 0.083, 0.060, 0.102]
+step 100: answer loss per model [0.014, 0.014, 0.012, 0.014]
+step 150: answer loss per model [0.008, 0.007, 0.007, 0.008]
+step 200: answer loss per model [0.005, 0.005, 0.004, 0.005]
+step 250: answer loss per model [0.004, 0.003, 0.003, 0.004]
+step 300: answer loss per model [0.003, 0.003, 0.002, 0.003]
+step 350: answer loss per model [0.002, 0.002, 0.002, 0.002]
+step 399: answer loss per model [0.002, 0.002, 0.002, 0.002]
+## cpu, this tree
+decoder adamw: vars c656bf57a256cfa38a87d3001024fcc7e32e81eb14067f6868dfa869261eac6d logits 279b9c1c1ec43b5d6402e51a0f14e495a336703120e77bf9dc0f3ce21fb1705b losses 3bd05493c994ff206d036948c105bfec70ea11bd0048d794adb61e751e52413b
+decoder sgd: vars 60a715ebd763b8350cf2a52c082652e31b40435596ea05be8cd70b94e2097cb8 logits 95f20649f149789796b1d0db290eff1b42b368f371d7340392b80fe76fa21e60 losses cd83b2da4b9dff6d62fe7612edb348205c215a03f1a6d85c2d695aebe204c224
+moe adamw: vars e992d79395f9bb70948e881f418756d9ca730338eb8dc6ddd940161d420bf438 logits bd505c599d48896d9d76489c69eea6f1a6de76afabf6c08a1a0949fe348da9d7 losses cb0819155e879d28b66ea7944d2a479935a3ac55a89aac7cbcbd414d3171ecdc
+moe sgd: vars 21247533cee9fbb2f344d948a19df155d77c1bec3d0aadf08624eac99c0da780 logits 0dfd8c4748e682e127ee014fcae80e3d69804b7ba308c062289aacc290adcff9 losses d28b0450fcc0a85b5f3cf6327dcc90fd86319a8bf5c189631e5b4c8146a6c50e
+dropout adamw: vars 8777c083964ce3f260d2c55af55a64de38b7ff645419daf95815ff59dcda109d logits 1bbea5928e25cd2198da53ca62cf1b26d39b1e45fd8b41a29e18bc1c9f0f5ba4 losses 9bbbb9ac864283bbde2d0589f9f3362f484ee6e34b362b5cc22aee532a4a3220
+dropout sgd: vars 45aaf45a4de30acd520d962f088f8a838a4a16919a8f9b9a652231e7271ed415 logits 3e224798adfb99d34d6a257079e87bf83aa13d4fe8b39d484518ae642ddd62e1 losses ca3fb72561b0add93184ea5d74df7385c3884020e815f7479301db53fc8f63c9
+copy_task:
+28032 parameters per model, 4 models, on Cpu(Reference)
+step   0: answer loss per model [3.317, 3.121, 3.316, 3.480]
+step  50: answer loss per model [0.124, 0.083, 0.060, 0.102]
+step 100: answer loss per model [0.014, 0.014, 0.012, 0.014]
+step 150: answer loss per model [0.008, 0.007, 0.007, 0.008]
+step 200: answer loss per model [0.005, 0.005, 0.004, 0.005]
+step 250: answer loss per model [0.004, 0.003, 0.003, 0.004]
+step 300: answer loss per model [0.003, 0.003, 0.002, 0.003]
+step 350: answer loss per model [0.002, 0.002, 0.002, 0.002]
+step 399: answer loss per model [0.002, 0.002, 0.002, 0.002]
+## cpu identical: yes
+## cuda, reference
+decoder adamw: vars 09565a2c5ceb6e3dfb05a6ed7b3e80dd3e1b7937317990bcb24e4362d0fe31c3 logits e67fdfbce4e82d75085db22b399facbc258474a192ded0744e426df517b1e9ef losses efaffec5a67b0384e3cc84b12703ce363ca33351ee9eae6623051d6aaf7b2306
+decoder sgd: vars fe0c3f203670995a07be5af1dd521c54412f6f2a711fadf48ac281521ea4397b logits fd9653f9838f8509748c66706dbc1548792406949f11e3adca0b200eae5847bf losses 659f4c03e1f5517d0b3e3fede5fa437db02db08844824e9f4fe079106a593658
+moe adamw: vars 093ee11b661d23f433380f3aa90e8afc9733d4b9b1b2d1633e7ef7ce2db3fe2e logits c2b14be63630a2e832bf1a1938f6839801afc44fee174d4ca31158bedd88eb88 losses 3109012a87b134375d5df0afdea7cdce775f15b6e3d8fec01a463be645b796fc
+moe sgd: vars d0b62566675a5968c04ce88e221f9873d1f79ad82253e3cb4c9e2772d0695baf logits ee1824a491275903c5ea0d78eefbc7f5a97eeb159485b4fb5f8db461a0581b78 losses 14e23a2d3edb82368a2a04e7adaf33d6b99f4b4363247236ee567e28cf723b6b
+dropout adamw: vars 85089bfb9fb2a119e69805b039643e62b234f6d57c1b178f01576c4b1817b448 logits 89f8b4e3a496d90c2a2ff9c0430155a725694d6869c5f5634b73eb19d74e27b0 losses 2075d65356ea6c8915727d6057c601a718349d195b01d8e31e7e5fe8c9024189
+dropout sgd: vars 5a0ea98e094ea13773897ef3aa53857eee678fbcbfc9dca56e9d0143ea419e19 logits a75d10b385650cf1c1ddaf219b510049b1e947e27b33e1a9001c74353360b9f2 losses 0b0ffc145af40d9658c5962cc6473d171d7022157a111dae1118ae03a2330305
+copy_task:
+28032 parameters per model, 4 models, on Cuda(0)
+step   0: answer loss per model [3.317, 3.121, 3.316, 3.480]
+step  50: answer loss per model [0.124, 0.083, 0.060, 0.102]
+step 100: answer loss per model [0.014, 0.014, 0.012, 0.014]
+step 150: answer loss per model [0.008, 0.007, 0.007, 0.008]
+step 200: answer loss per model [0.005, 0.005, 0.004, 0.005]
+step 250: answer loss per model [0.004, 0.003, 0.003, 0.004]
+step 300: answer loss per model [0.003, 0.003, 0.002, 0.003]
+step 350: answer loss per model [0.002, 0.002, 0.002, 0.002]
+step 399: answer loss per model [0.002, 0.002, 0.002, 0.002]
+## cuda, this tree
+decoder adamw: vars 09565a2c5ceb6e3dfb05a6ed7b3e80dd3e1b7937317990bcb24e4362d0fe31c3 logits e67fdfbce4e82d75085db22b399facbc258474a192ded0744e426df517b1e9ef losses efaffec5a67b0384e3cc84b12703ce363ca33351ee9eae6623051d6aaf7b2306
+decoder sgd: vars fe0c3f203670995a07be5af1dd521c54412f6f2a711fadf48ac281521ea4397b logits fd9653f9838f8509748c66706dbc1548792406949f11e3adca0b200eae5847bf losses 659f4c03e1f5517d0b3e3fede5fa437db02db08844824e9f4fe079106a593658
+moe adamw: vars 093ee11b661d23f433380f3aa90e8afc9733d4b9b1b2d1633e7ef7ce2db3fe2e logits c2b14be63630a2e832bf1a1938f6839801afc44fee174d4ca31158bedd88eb88 losses 3109012a87b134375d5df0afdea7cdce775f15b6e3d8fec01a463be645b796fc
+moe sgd: vars d0b62566675a5968c04ce88e221f9873d1f79ad82253e3cb4c9e2772d0695baf logits ee1824a491275903c5ea0d78eefbc7f5a97eeb159485b4fb5f8db461a0581b78 losses 14e23a2d3edb82368a2a04e7adaf33d6b99f4b4363247236ee567e28cf723b6b
+dropout adamw: vars 85089bfb9fb2a119e69805b039643e62b234f6d57c1b178f01576c4b1817b448 logits 89f8b4e3a496d90c2a2ff9c0430155a725694d6869c5f5634b73eb19d74e27b0 losses 2075d65356ea6c8915727d6057c601a718349d195b01d8e31e7e5fe8c9024189
+dropout sgd: vars 5a0ea98e094ea13773897ef3aa53857eee678fbcbfc9dca56e9d0143ea419e19 logits a75d10b385650cf1c1ddaf219b510049b1e947e27b33e1a9001c74353360b9f2 losses 0b0ffc145af40d9658c5962cc6473d171d7022157a111dae1118ae03a2330305
+copy_task:
+28032 parameters per model, 4 models, on Cuda(0)
+step   0: answer loss per model [3.317, 3.121, 3.316, 3.480]
+step  50: answer loss per model [0.124, 0.083, 0.060, 0.102]
+step 100: answer loss per model [0.014, 0.014, 0.012, 0.014]
+step 150: answer loss per model [0.008, 0.007, 0.007, 0.008]
+step 200: answer loss per model [0.005, 0.005, 0.004, 0.005]
+step 250: answer loss per model [0.004, 0.003, 0.003, 0.004]
+step 300: answer loss per model [0.003, 0.003, 0.002, 0.003]
+step 350: answer loss per model [0.002, 0.002, 0.002, 0.002]
+step 399: answer loss per model [0.002, 0.002, 0.002, 0.002]
+## cuda identical: yes
