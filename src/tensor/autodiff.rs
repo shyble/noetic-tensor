@@ -127,6 +127,18 @@ pub(crate) fn record_view(input: &Tensor, layout: super::layout::Layout, backwar
 }
 
 pub(crate) fn run_backward(root: &Tensor) -> Gradients {
+    run_backward_with(root, None)
+}
+
+/// `run_backward`, telling `on_ready` each `require_grad` leaf's id and gradient as soon as the
+/// gradient is final (its last consumer's step has run), while the rest of the backward pass
+/// continues. The traversal and every addition are `run_backward`'s: the notification only
+/// reads the gradient. Leaves that receive no gradient are not named.
+pub(crate) fn run_backward_notify(root: &Tensor, on_ready: &mut dyn FnMut(u64, &Tensor)) -> Gradients {
+    run_backward_with(root, Some(on_ready))
+}
+
+fn run_backward_with(root: &Tensor, mut on_ready: Option<&mut dyn FnMut(u64, &Tensor)>) -> Gradients {
     super::error::ok(super::infer::backward_root(&root.layout.shape, root.node.is_some()));
     let root_node = root.node.clone().expect("tracked");
     // Every node reachable from the root, by id (burn keeps them in the server's step map).
@@ -163,6 +175,15 @@ pub(crate) fn run_backward(root: &Tensor) -> Gradients {
             level.push(step);
         }
     }
+    // With a notification: per leaf, the steps that still add to its gradient.
+    let mut pending: HashMap<u64, usize> = HashMap::new();
+    if on_ready.is_some() {
+        for node in tape.iter().flatten().filter(|n| n.backward.is_some()) {
+            for input in node.inputs.iter().flatten().filter(|i| i.backward.is_none()) {
+                *pending.entry(input.id).or_insert(0) += 1;
+            }
+        }
+    }
     let mut grads: HashMap<u64, Tensor> = HashMap::new();
     grads.insert(root_node.id, Tensor::full_like(root.layout.shape.clone(), 1.0, root));
     for level in tape.into_iter().rev() {
@@ -179,6 +200,14 @@ pub(crate) fn run_backward(root: &Tensor) -> Gradients {
                     None => g,
                 };
                 grads.insert(input.id, g);
+                if let Some(f) = on_ready.as_mut() {
+                    if let Some(left) = pending.get_mut(&input.id) {
+                        *left -= 1;
+                        if *left == 0 {
+                            f(input.id, &grads[&input.id]);
+                        }
+                    }
+                }
             }
         }
     }

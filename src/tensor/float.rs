@@ -365,6 +365,18 @@ impl Tensor {
         run_backward(self)
     }
 
+    /// `backward`, telling `on_ready` each `require_grad` leaf's id (`leaf_id`) and gradient as
+    /// soon as that gradient is final, while the backward pass continues (for communication
+    /// overlapped with it). The gradients are `backward`'s, bit for bit.
+    pub(crate) fn backward_notify(&self, on_ready: &mut dyn FnMut(u64, &Tensor)) -> Gradients {
+        super::autodiff::run_backward_notify(self, on_ready)
+    }
+
+    /// The id of this `require_grad` leaf's node (None for an untracked tensor or a non-leaf).
+    pub(crate) fn leaf_id(&self) -> Option<u64> {
+        self.node.as_ref().filter(|n| n.backward.is_none()).map(|n| n.id)
+    }
+
     /// This leaf's gradient in `grads` (burn `grad`), untracked.
     pub fn grad(&self, grads: &Gradients) -> Option<Tensor> {
         grads.get(self)
