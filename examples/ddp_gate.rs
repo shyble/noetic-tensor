@@ -41,11 +41,18 @@
 //! - `--losses`: rank 0 prints each step's mean loss over the global micro-steps
 //!   (`loss <step> <value>`; an all-gather of the ranks' losses, after the step's reduction);
 //! - `--width D` [32], `--blocks L` [2], `--mlp F` [64]: a larger decoder (for timing); the
-//!   defaults are the gate's model. Rank 0 prints the training loop's wall time (`wall <seconds>`).
+//!   defaults are the gate's model. Rank 0 prints the training loop's wall time (`wall <seconds>`);
+//! - `--mixed`: mixed precision on a GPU (`MatmulPrecision::Half` for the products, set before the
+//!   group is made so that its key names it; f32 vars and optimizer state), with `--loss-scale K`
+//!   [0]: a static loss scale of 2^K; a step whose gradients are not finite is skipped on every rank
+//!   (`skipped <step>`); rank 0 prints the mixed record;
+//! - `--zero S:P`: sharded data parallelism (`ShardedDataParallel`, AdamW only, no clipping) at
+//!   stage S (1, 2, 3) with partition P (flat, by-var); its checkpoints are consolidated ones.
 
-use noetic::nn::dist::{check_in_sync, data_parallel_grads, data_parallel_step, state_hash, Checkpoint, CheckpointOptimizer, DeviceKind, DistEnv, DistMode, FastOptions, GroupOptions, ProcessGroup, Reduce, Shard, ShardSpec};
+use noetic::nn::dist::{check_in_sync, data_parallel_grads, data_parallel_step, mixed_data_parallel_grads, mixed_data_parallel_step, mixed_record, mixed_sharded_step, state_hash, Checkpoint, CheckpointOptimizer, DeviceKind, DistEnv, DistMode, FastOptions, GroupOptions, Partition, ProcessGroup, Reduce, Shard, ShardOptions, ShardSpec, ShardStage, ShardedDataParallel};
 use noetic::nn::{clip_grad_norm_per_seed, masked_cross_entropy, Adam, AdamConfig, DecayOrder, Decoder, DecoderConfig, ForwardOptions, Optimizer, ParamGroups, Sgd, SgdConfig, VarMap};
-use noetic::tensor::{pin_reference, set_default_device, CpuMode, Device, IntTensor, Tensor};
+use noetic::nn::LossScale;
+use noetic::tensor::{pin_reference, set_default_device, set_matmul_precision, CpuMode, Device, IntTensor, MatmulPrecision, Tensor};
 use noetic::rng::derive;
 use rand::Rng;
 use std::io::Write;
@@ -148,10 +155,13 @@ struct Args {
     width: usize,
     blocks: usize,
     mlp: usize,
+    mixed: bool,
+    loss_scale: i32,
+    zero: Option<(String, String)>,
 }
 
 fn args() -> Result<Args, String> {
-    let mut a = Args { device: "cpu".into(), ranks_per_device: 1, micro: 2, steps: 12, opt: "adamw".into(), clip: None, absent: false, idle: None, ckpt_every: 0, ckpt_dir: None, resume: false, node_copies: false, pause: None, cpu_ranks: vec![], out: None, job_key: "ddp gate".into(), fast: false, bucket_kb: 25 << 10, overlap: true, losses: false, width: 32, blocks: 2, mlp: 64 };
+    let mut a = Args { device: "cpu".into(), ranks_per_device: 1, micro: 2, steps: 12, opt: "adamw".into(), clip: None, absent: false, idle: None, ckpt_every: 0, ckpt_dir: None, resume: false, node_copies: false, pause: None, cpu_ranks: vec![], out: None, job_key: "ddp gate".into(), fast: false, bucket_kb: 25 << 10, overlap: true, losses: false, width: 32, blocks: 2, mlp: 64, mixed: false, loss_scale: 0, zero: None };
     let mut it = std::env::args().skip(1);
     let num = |v: Option<String>, k: &str| -> Result<u64, String> { v.ok_or(format!("{k} needs a value"))?.parse().map_err(|_| format!("{k}: not a number")) };
     while let Some(k) = it.next() {
@@ -183,6 +193,13 @@ fn args() -> Result<Args, String> {
             "--width" => a.width = num(it.next(), &k)? as usize,
             "--blocks" => a.blocks = num(it.next(), &k)? as usize,
             "--mlp" => a.mlp = num(it.next(), &k)? as usize,
+            "--mixed" => a.mixed = true,
+            "--loss-scale" => a.loss_scale = it.next().ok_or("--loss-scale needs a value")?.parse().map_err(|_| "--loss-scale: not a number")?,
+            "--zero" => {
+                let v = it.next().ok_or("--zero needs S:P")?;
+                let (st, p) = v.split_once(':').ok_or("--zero needs S:P (1|2|3:flat|by-var)")?;
+                a.zero = Some((st.to_string(), p.to_string()));
+            }
             other => return Err(format!("unknown option {other:?} (see the file's header)")),
         }
     }
@@ -191,6 +208,12 @@ fn args() -> Result<Args, String> {
     }
     if a.idle.is_some() && a.opt == "sgd" {
         return Err("--idle trains under AdamW (--opt adamw)".into());
+    }
+    if !a.mixed && a.loss_scale != 0 {
+        return Err("--loss-scale belongs to mixed precision (--mixed)".into());
+    }
+    if a.zero.is_some() && (a.opt != "adamw" || a.clip.is_some() || a.idle.is_some()) {
+        return Err("--zero trains under AdamW without --clip or --idle".into());
     }
     if !a.fast && (a.bucket_kb != 25 << 10 || !a.overlap) {
         return Err("--bucket-kb and --no-overlap belong to the fast mode (--fast)".into());
@@ -223,7 +246,18 @@ fn main() -> noetic::Result<()> {
     }
     // The gate's job key, unchanged for the gate's model; a larger model names its size.
     let size = if (a.width, a.blocks, a.mlp) == (32, 2, 64) { String::new() } else { format!(" width={} blocks={} mlp={}", a.width, a.blocks, a.mlp) };
-    let mut opts = GroupOptions::new(format!("{} micro={} absent={} idle={:?} opt={} clip={:?}{size}", a.job_key, a.micro, a.absent, a.idle, a.opt, a.clip)).with_device(device);
+    // The job key, unchanged for the gate's runs; a loss scale and the sharding name themselves.
+    // Mixed precision itself is in the group's key (the device's part names the product), so a
+    // mixed and an f32 run with the same options share a job key and the group key keeps them
+    // apart (a mixed job, or a resume across precisions, is refused by it).
+    let mixed_part = if a.loss_scale != 0 { format!(" loss-scale=2^{}", a.loss_scale) } else { String::new() };
+    let zero_part = a.zero.as_ref().map_or(String::new(), |(st, p)| format!(" zero={st}:{p}"));
+    let mut opts = GroupOptions::new(format!("{} micro={} absent={} idle={:?} opt={} clip={:?}{size}{mixed_part}{zero_part}", a.job_key, a.micro, a.absent, a.idle, a.opt, a.clip)).with_device(device);
+    // Mixed precision: the products at Half, set before the group is made (its key names it).
+    let scale = LossScale::power_of_two(a.loss_scale)?;
+    if a.mixed {
+        set_matmul_precision(MatmulPrecision::Half);
+    }
     if a.fast {
         opts = opts.with_mode(DistMode::Fast(FastOptions::new().with_bucket_bytes(a.bucket_kb << 10).with_overlap(a.overlap)));
     }
@@ -249,10 +283,25 @@ fn main() -> noetic::Result<()> {
     }
     let mut opt = match a.opt.as_str() {
         "sgd" => Opt::Sgd(Sgd::new(SgdConfig { lr: 0.05, momentum: 0.9, weight_decay: 1e-3, ..Default::default() }, ParamGroups::new(&vars), &vars)),
-        _ => Opt::Adam(Adam::new(adam_cfg, ParamGroups::new(&vars), &vars)),
+        _ => Opt::Adam(Adam::new(adam_cfg.clone(), ParamGroups::new(&vars), &vars)),
     };
     set_default_device(device)?;
     check_in_sync(&mut group, &vars)?;
+    // Sharded data parallelism (--zero): the vars and AdamW's state split among the ranks.
+    let mut sdp = match &a.zero {
+        None => None,
+        Some((st, p)) => {
+            let stage = match st.as_str() {
+                "1" => ShardStage::OptimizerState,
+                "2" => ShardStage::Gradients,
+                "3" => ShardStage::Parameters,
+                s => return Err(noetic::NnError::Dist(format!("--zero {s}: stage 1, 2 or 3"))),
+            };
+            let partition = if p == "by-var" { Partition::ByVar } else { Partition::Flat };
+            let cfg = adam_cfg.clone();
+            Some(ShardedDataParallel::new(&mut group, vars.clone(), ParamGroups::new(&vars), ShardOptions::new(stage).with_partition(partition), move |v, g| Adam::new(cfg, g, v))?)
+        }
+    };
     // The data: every rank checks every rank's shard hash for this run's steps.
     let spec = ShardSpec { seed: 11, items: 24, micro_batch: 2, micro_steps: a.micro };
     let shard = Shard::new(spec.clone(), rank, world)?;
@@ -275,7 +324,15 @@ fn main() -> noetic::Result<()> {
         let dir = ckpt.as_ref().expect("checked above");
         let c = Checkpoint::load_latest(&mut group, dir)?.ok_or_else(|| noetic::NnError::Dist(format!("no checkpoint under {}", dir.display())))?;
         start = c.cursor(rank).ok_or_else(|| noetic::NnError::Dist("no cursor for this rank".into()))?;
-        c.restore(&mut vars, opt.ckpt_mut())?;
+        match sdp.as_mut() {
+            None => {
+                c.restore(&mut vars, opt.ckpt_mut())?;
+            }
+            Some(z) => {
+                z.restore_consolidated(c)?;
+                vars = z.full_params(&mut group)?;
+            }
+        }
         check_in_sync(&mut group, &vars)?;
         println!("rank {rank}: resumed at step {start}");
     }
@@ -310,16 +367,41 @@ fn main() -> noetic::Result<()> {
             }
             l
         };
-        match a.clip {
-            None => {
+        let mut stepped = true;
+        match (&mut sdp, a.mixed, a.clip) {
+            (Some(z), false, _) => {
+                z.step(&mut group, k, Reduce::Mean, 1.0, f)?;
+            }
+            (Some(z), true, _) => {
+                stepped = mixed_sharded_step(z, &mut group, k, Reduce::Mean, 1.0, scale, f)?.stepped;
+            }
+            (None, false, None) => {
                 data_parallel_step(&mut group, &mut vars, opt.opt(), k, Reduce::Mean, 1.0, f)?;
             }
-            Some(max) => {
+            (None, true, None) => {
+                stepped = mixed_data_parallel_step(&mut group, &mut vars, opt.opt(), k, Reduce::Mean, 1.0, scale, f)?.stepped;
+            }
+            (None, false, Some(max)) => {
                 let (mut grads, _) = data_parallel_grads(&mut group, &vars, k, Reduce::Mean, f)?;
                 let norms = clip_grad_norm_per_seed(&mut grads, max);
                 clipped += norms.iter().any(|n| *n > max) as usize;
                 opt.opt().step(&mut vars, grads, 1.0);
             }
+            (None, true, Some(max)) => {
+                let (mut grads, _, finite) = mixed_data_parallel_grads(&mut group, &vars, k, Reduce::Mean, scale, f)?;
+                stepped = finite;
+                if finite {
+                    let norms = clip_grad_norm_per_seed(&mut grads, max);
+                    clipped += norms.iter().any(|n| *n > max) as usize;
+                    opt.opt().step(&mut vars, grads, 1.0);
+                }
+            }
+        }
+        if !stepped && rank == 0 {
+            println!("skipped {} (gradients not finite)", step + 1);
+        }
+        if let Some(z) = &sdp {
+            vars = z.full_params(&mut group)?;
         }
         if a.losses {
             // The global mean over the step's micro-steps, added in rank order on every rank.
@@ -336,7 +418,14 @@ fn main() -> noetic::Result<()> {
             writeln!(l, "{} {h}", step + 1).map_err(|e| noetic::NnError::Dist(e.to_string()))?;
         }
         if a.ckpt_every > 0 && (step + 1) % a.ckpt_every == 0 {
-            Checkpoint::save_with(&mut group, ckpt.as_ref().expect("checked above"), step + 1, step + 1, &vars, opt.ckpt(), a.node_copies)?;
+            match &sdp {
+                None => {
+                    Checkpoint::save_with(&mut group, ckpt.as_ref().expect("checked above"), step + 1, step + 1, &vars, opt.ckpt(), a.node_copies)?;
+                }
+                Some(z) => {
+                    z.save_consolidated(&mut group, ckpt.as_ref().expect("checked above"), step + 1, step + 1)?;
+                }
+            }
         }
     }
     let wall = started.elapsed().as_secs_f64();
@@ -347,10 +436,19 @@ fn main() -> noetic::Result<()> {
         if a.clip.is_some() {
             println!("clipped on {clipped} of {} steps", a.steps - start);
         }
-        println!("record {}", group.record());
+        // The run's record: the group's (unchanged for the gate's runs), with the sharding and the
+        // mixed precision when used.
+        let mut record = match &sdp {
+            None => group.record(),
+            Some(z) => z.record(&group),
+        };
+        if a.mixed {
+            record = format!("{record} {}", mixed_record(&group, scale).trim_start_matches(&group.record()).trim());
+        }
+        println!("record {record}");
         if let Some(o) = &out {
             vars.save(o.join("final.json"))?;
-            std::fs::write(o.join("record.txt"), format!("{}\nfinal {fin}\nshard {shard_hash}\n", group.record())).map_err(|e| noetic::NnError::Dist(e.to_string()))?;
+            std::fs::write(o.join("record.txt"), format!("{record}\nfinal {fin}\nshard {shard_hash}\n")).map_err(|e| noetic::NnError::Dist(e.to_string()))?;
         }
     }
     group.barrier()?;

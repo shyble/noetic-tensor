@@ -83,6 +83,8 @@ pub fn data_parallel_grads(
     if let Some((i, t)) = vars.tensors().iter().enumerate().find(|(_, t)| t.device() != group.device()) {
         return Err(NnError::Dist(format!("var {:?} is on {:?}, the group trains on {:?} (GroupOptions::device)", vars.names()[i], t.device(), group.device())));
     }
+    // The step multiplies at the precision the group's key names.
+    group.check_precision()?;
     if group.is_fast() {
         // The fast mode (not reproducible bit for bit; its own key): see `fast`.
         let (vals, count) = super::fast::fast_grads(group, vars, micro_steps_per_rank, how, super::fast::Target::AllReduce, micro)?;
