@@ -2,15 +2,15 @@
 
 ## Unreleased
 
-Documentation only; no code changed. The 0.6.0 release's deterministic mode, with every 0.6.0 option off, was tested on more than one GPU and more than one machine:
+Documentation only; no code changed. The 0.6.0 release's deterministic mode, with every 0.6.0 option off, was tested on two GPUs in one machine and on two machines:
 
-Tested on rented cloud machines, with its key in `doc/distributed.md` ("Two GPUs in one machine, and two machines"):
-- 2 ranks on 2 L4 GPUs in one machine, data-parallel (world sizes 2 and 4) and sharded (stages 1–3), equal to one GPU with accumulation;
-- 2 machines with one L4 each over a private network, data-parallel on the CPU (world sizes 2 and 4) and on the GPU (world size 2), equal to one machine.
+Tested on rented cloud machines, with each setup's key in `doc/distributed.md` ("Two GPUs in one machine, and two machines"):
+- 2 L4 GPUs in one machine (driver 580.126.09): data-parallel with one rank per GPU (world size 2) and two ranks per GPU (world size 4), and sharded (stages 1–3, world size 2), equal to one GPU with accumulation;
+- 2 machines with one L4 each over a private network (driver 595.91.07): data-parallel with one GPU each (world size 2) and on the CPU (world sizes 2 and 4), equal to one machine.
 
-Drivers 580.126.09 and 595.91.07. Deterministic path only. Untested: more than 2 GPUs or 2 machines, other GPU models and drivers, NCCL, and the fast mode, half-precision products and mixed precision on these machines.
+Deterministic path only. Untested: more than 2 GPUs or 2 machines, other GPU models and drivers, NCCL, and the fast mode, half-precision products and mixed precision on these machines.
 
-Shown on both: byte-identical final weights and per-step hashes against one GPU (or one machine) with accumulation, a killed rank resumed from a checkpoint, and refusals before step 0. Sharding was tested on two GPUs in one machine only. `Cuda(1)` gave `Cuda(0)`'s results bit for bit. The engine's own tests passed on both machines' CPU and CUDA backends, the tests of the 0.6.0 options skipped by name.
+Shown: byte-identical final weights against one GPU or one machine with accumulation (and every per-step hash in the GPU runs), and a killed rank resumed from a checkpoint, on both setups; refusals before step 0 (another secret, no secret, a CPU rank in a GPU job) across the two machines. The engine's own tests passed on the two-GPU machine's CPU and CUDA backends, with the tests of the 0.6.0 options skipped by name. Sharding was tested on two GPUs in one machine only. On the two-GPU machine, `Cuda(1)` gave `Cuda(0)`'s results bit for bit.
 
 ## 0.6.0
 

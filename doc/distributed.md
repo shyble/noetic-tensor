@@ -391,11 +391,11 @@ See `doc/mixed_precision.md`. A group made while the thread's matmul precision i
 
 ## Two GPUs in one machine, and two machines (after 0.6.0's release)
 
-Tested on rented cloud machines, with its key in `doc/distributed.md` ("Two GPUs in one machine, and two machines"):
-- 2 ranks on 2 L4 GPUs in one machine, data-parallel (world sizes 2 and 4) and sharded (stages 1–3), equal to one GPU with accumulation;
-- 2 machines with one L4 each over a private network, data-parallel on the CPU (world sizes 2 and 4) and on the GPU (world size 2), equal to one machine.
+Tested on rented cloud machines, with each setup's key below:
+- 2 L4 GPUs in one machine (driver 580.126.09): data-parallel with one rank per GPU (world size 2) and two ranks per GPU (world size 4), and sharded (stages 1–3, world size 2), equal to one GPU with accumulation;
+- 2 machines with one L4 each over a private network (driver 595.91.07): data-parallel with one GPU each (world size 2) and on the CPU (world sizes 2 and 4), equal to one machine.
 
-Drivers 580.126.09 and 595.91.07. Deterministic path only. Untested: more than 2 GPUs or 2 machines, other GPU models and drivers, NCCL, and the fast mode, half-precision products and mixed precision on these machines.
+Deterministic path only. Untested: more than 2 GPUs or 2 machines, other GPU models and drivers, NCCL, and the fast mode, half-precision products and mixed precision on these machines.
 
 These runs used the 0.6.0 release unchanged, with every 0.6.0 option off: the fast mode, the half-precision products and mixed precision were not tested on these machines, and their own tests were skipped by name (`fast_tests`, `mixed_tests`, `half_gemm`). Sharding was tested on two GPUs in one machine only, not across machines. Each result holds for its own key below; the two setups' keys differ (driver, CPU features), and no result is pooled across them.
 
