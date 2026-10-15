@@ -416,6 +416,36 @@ fn the_rendezvous_refuses_another_job_key_platform_or_world_size() {
     }
 }
 
+/// The hello carries the engine's version and the wire protocol's (`wire_version`): a rank of
+/// another engine, another protocol, or an engine that says none (0.4.0 and earlier) is refused
+/// at the rendezvous, on every rank, before step 0; the group's key does not hold the versions.
+#[test]
+fn the_rendezvous_refuses_another_engine_or_wire_version() {
+    assert_eq!(wire_version(), format!("engine={} wire={WIRE_PROTOCOL}", env!("CARGO_PKG_VERSION")));
+    assert_eq!(WIRE_PROTOCOL, 2);
+    for (name, theirs) in [("another engine", "engine=0.4.9 wire=2".to_string()), ("another protocol", format!("engine={} wire=1", env!("CARGO_PKG_VERSION"))), ("no version", String::new())] {
+        for odd in [1usize, 0] {
+            let t = theirs.clone();
+            let res = on_ranks_with(2, move |r| {
+                let mut o = opts("k");
+                if r == odd {
+                    o.wire = t.clone();
+                }
+                o
+            }, |_| ());
+            for (r, x) in res.iter().enumerate() {
+                let e = x.as_ref().unwrap_err();
+                assert!(e.message().contains("refused") && e.message().contains("mixed-version job"), "{name}, rank {odd} odd, rank {r}: {e}");
+            }
+        }
+    }
+    let res = on_ranks(2, opts("k"), |g| g.key());
+    for x in res {
+        let k = x.unwrap();
+        assert!(!k.contains("engine=") && !k.contains("wire="), "{k}");
+    }
+}
+
 #[test]
 fn a_stopped_rank_or_another_collective_fails_the_others() {
     // Rank 2 leaves after the barrier: the others' next collective fails at once (no hang).
@@ -988,6 +1018,75 @@ fn body_ddp_worker() {
         assert_eq!(h.as_slice(), Shard::new(sp.clone(), q, world).unwrap().hash(0..steps).as_bytes(), "rank {q}'s shard");
     }
     let ckpt = out.join("ckpt");
+    // With DIST_TEST_ZERO (1, 2 or 3), sharded data parallelism at that stage
+    // (DIST_TEST_PARTITION flat or by-var), with consolidated checkpoints, or sharded ones with
+    // DIST_TEST_CKPT_KIND=sharded.
+    if let Ok(stage) = std::env::var("DIST_TEST_ZERO") {
+        let o = zero_tests::shard_options(&stage, &std::env::var("DIST_TEST_PARTITION").unwrap_or_default());
+        let sharded_ckpt = std::env::var("DIST_TEST_CKPT_KIND").as_deref() == Ok("sharded");
+        let make = zero_tests::gate_opt_maker(&opt);
+        drop(opt);
+        let mut model = ShardedDataParallel::new(&mut g, vars.clone(), ParamGroups::new(&vars), o, make).unwrap_or_else(|e| panic!("{e}"));
+        drop(vars);
+        let mut start = 0;
+        if std::env::var("DIST_TEST_RESUME").is_ok() {
+            start = if sharded_ckpt {
+                let c = model.load_sharded_latest(&mut g, &ckpt).unwrap_or_else(|e| panic!("{e}")).expect("a checkpoint to resume from");
+                assert_eq!(c.cursor(rank), Some(c.meta.step), "this rank's cursor");
+                model.restore_sharded(&mut g, c).unwrap_or_else(|e| panic!("{e}"))
+            } else {
+                let c = Checkpoint::load_latest(&mut g, &ckpt).unwrap_or_else(|e| panic!("{e}")).expect("a checkpoint to resume from");
+                assert_eq!(c.cursor(rank), Some(c.meta.step), "this rank's cursor");
+                model.restore_consolidated(c).unwrap_or_else(|e| panic!("{e}"))
+            };
+            let full = model.full_params(&mut g).unwrap();
+            check_in_sync(&mut g, &full).unwrap();
+            eprintln!("rank {rank}: resumed at step {start}");
+        }
+        let mut log = std::fs::OpenOptions::new().create(true).append(true).open(out.join(format!("rank-{rank}.steps"))).unwrap();
+        for step in start..steps {
+            if pause == Some((rank, step)) {
+                std::fs::write(out.join(format!("paused-{rank}")), step.to_string()).unwrap();
+                loop {
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+            }
+            let k = shard.micro_steps_per_rank();
+            let loss = |lifted: &VarMap, i: usize| gate_micro(&cfg, lifted, &shard.batch(step, i), step, shard.global_micro(i) as u64, micro, absent);
+            match clip {
+                None => {
+                    model.step(&mut g, k, Reduce::Mean, 1.0, loss).unwrap();
+                }
+                Some(max) => {
+                    let mut grads = model.grads(&mut g, k, Reduce::Mean, loss).unwrap();
+                    let norms = grads.clip_grad_norm_per_seed(&mut g, max).unwrap();
+                    clipped += norms.iter().any(|n| *n > max) as usize;
+                    model.apply(&mut g, grads, 1.0).unwrap();
+                }
+            }
+            let full = model.full_params(&mut g).unwrap();
+            let h = check_in_sync(&mut g, &full).unwrap();
+            use std::io::Write;
+            writeln!(log, "{} {h}", step + 1).unwrap();
+            if every > 0 && (step + 1) % every == 0 {
+                if sharded_ckpt {
+                    model.save_sharded(&mut g, &ckpt, step + 1, step + 1).unwrap();
+                } else {
+                    model.save_consolidated(&mut g, &ckpt, step + 1, step + 1).unwrap();
+                }
+            }
+        }
+        let m = model.memory();
+        std::fs::write(out.join(format!("rank-{rank}.memory")), format!("params={} grads={} optimizer_state={}\n", m.params, m.grads, m.optimizer_state)).unwrap();
+        let full = model.full_params(&mut g).unwrap();
+        if rank == 0 {
+            full.save(out.join("final.json")).unwrap();
+            std::fs::write(out.join("key.txt"), format!("{}\n{}\n", model.record(&g), mine)).unwrap();
+            std::fs::write(out.join("clipped.txt"), format!("{clipped}\n")).unwrap();
+        }
+        g.barrier().unwrap();
+        return;
+    }
     let mut start = 0;
     if std::env::var("DIST_TEST_RESUME").is_ok() {
         let c = Checkpoint::load_latest(&mut g, &ckpt).unwrap_or_else(|e| panic!("{e}")).expect("a checkpoint to resume from");
@@ -1806,3 +1905,5 @@ fn group_options_are_built_with_a_builder() {
     assert_eq!(GroupOptions::new("x").platform, platform_key());
 }
 
+#[path = "zero_tests.rs"]
+mod zero_tests;
