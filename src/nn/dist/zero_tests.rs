@@ -357,7 +357,7 @@ fn files_under(dir: &Path) -> BTreeMap<String, Vec<u8>> {
             if p.is_dir() {
                 walk(base, &p, out);
             } else {
-                out.insert(p.strip_prefix(base).unwrap().display().to_string(), std::fs::read(&p).unwrap());
+                out.insert(p.strip_prefix(base).unwrap().display().to_string().replace('\\', "/"), std::fs::read(&p).unwrap());
             }
         }
     }

@@ -22,6 +22,8 @@ Released in 0.3.0 (9 October 2026) for the CPU. Released in 0.4.0 (10 October 20
 | `DeviceKind`, `DistEnv::device`, `GroupOptions::device`, `device_key` | Since 0.4.0. The rank's device from its rank on the node (torchrun's `cuda:LOCAL_RANK`), the group's device, and the device's part of the platform key (`device=…`, none for the CPU reference backend). |
 | `examples/launch.rs` | The launcher as a command: `launch --nproc-per-node N [--nnodes M --node-rank I --master-addr A --master-port P] [--log-dir D] [--secret-file F | --no-auth] -- <command> [args]`. |
 | `examples/ddp_copy_task.rs` | The copy task trained data-parallel; the same weights at 1, 2 and 4 processes. |
+| `ShardedDataParallel`, `ShardOptions`, `ShardGrads`, `ShardLayout` | Unreleased. Sharded data parallelism in the shape of ZeRO's stages and FSDP, with the weights of data parallelism bit for bit; consolidated and sharded checkpoints (see "Sharded data parallelism"). |
+| `examples/ddp_gate.rs` | Unreleased. The gates' training as an example binary, one device per rank from `LOCAL_RANK` (see "The gate as an example binary"). |
 
 A training loop:
 
@@ -194,6 +196,139 @@ The same gate on the CPU (`gate_clipping_world_sizes_equal_one_process`): macOS 
 
 These gates show the order of the sum and the checkpoint path on a GPU. They do not show anything about several GPUs: all ranks run on one GPU, and `Cuda(i)` for i > 0 was not available.
 
+## The gate as an example binary: one device per rank (unreleased)
+
+Status: built; tested on one machine per device kind (the CPU reference backend on macOS aarch64 and Windows x86_64, a single CUDA GPU on Windows shared by up to four processes, one Apple GPU on macOS shared by two; shown: the reference's weights and every per-step hash at every configuration, a resume from a checkpoint); multi-GPU, multi-machine and datacenter runs untested.
+
+The GPU gates above run every rank of a node on its first GPU, and `examples/ddp_copy_task.rs` runs on the CPU only. `examples/ddp_gate.rs` is the gates' training as an example binary that the launcher (`examples/launch.rs`) starts on one or several machines, each rank on the device its rank on the node gives (`DistEnv::device`: `--ranks-per-device 1` is torchrun's `cuda:LOCAL_RANK`, one GPU per rank; K ranks per device share a GPU). Run without rendezvous variables it is the reference: one process on one device accumulating the M global micro-steps.
+
+- The gate's model, data, dropout keying and optimizers, exactly as the gates: `--micro M`, `--steps N` (12), `--opt adamw|sgd`, `--clip X`, `--absent`, `--idle after|torch`.
+- Every rank prints the vars' sha256 after each step (checked equal on every rank by `check_in_sync`); rank 0 prints the final weights' sha256 and the run's record (key, world size, `auth`, weight checks). `--out DIR` writes `rank-<r>.steps`, `final.json` and `record.txt`.
+- Coordinated checkpoints (`--ckpt-every E`, `--ckpt-dir D`, `--resume`, `--node-copies`), `--pause R:S` (a rank waits before step S, to be killed), `--cpu-ranks R,…` (a mixed job, for the refusal), `--job-key K`.
+- Every rank checks every rank's shard hash for the run's steps, and rank 0 prints its own.
+
+```sh
+E=target/release/examples                     # cargo build --release --features cuda --examples
+$E/ddp_gate --device cuda --micro 2           # the reference: 1 GPU × 2 micro-steps
+$E/launch --nproc-per-node 2 -- $E/ddp_gate --device cuda --micro 2                        # one GPU per rank
+$E/launch --nproc-per-node 2 -- $E/ddp_gate --device cuda --micro 2 --ranks-per-device 2   # both on GPU 0
+```
+
+On the CPU it reproduces the gates' recorded weights (`9a24f95f50da08572824c0561890ea3213cc5076274b0cfaffe3bc6abba851d6` at 2 micro-steps, `02ead67c808b59bde6852388e13d48a89c257b22a8080b95549bc780f2cf1a78` at 4, the clipping and SGD gates' hashes), and on each GPU the GPU gates' (CUDA `3263b99095eded48b1d0cc9c69d2492b56d9dfe38573ed35f797a6132339ff49`, Metal `e261aa4cd3b1b6b9eeb4e1ba4f8699eb1f648a1c2032d9028d08a03b9918306f` at 2 micro-steps). The references below were taken with every rank on the machine's one device (`doc/gates/e2/ddp_gate_refs.sh`, `doc/gates/e2/win_gates.ps1 -Part ddpgate`; logs `doc/gates/e2/logs/*-ddp-gate.log`): at each configuration, 2 (and on Windows 4) ranks sharing the device gave the reference's final weights and every per-step hash.
+
+| Device (key as in "GPU ranks") | Configuration | M = 2: reference, and W = 2 sharing the device | M = 4: reference, and W = 2 (Windows: and 4) |
+|---|---|---|---|
+| CPU, macOS aarch64 | gate (AdamW) | `9a24f95f50da08572824c0561890ea3213cc5076274b0cfaffe3bc6abba851d6` | `02ead67c808b59bde6852388e13d48a89c257b22a8080b95549bc780f2cf1a78` |
+| | clip 1.0 | `382d20b6b7c970187cabb9909918c78cc7d4a23695de51d9d1c846fddacb99c0` | `5d4fa2a91c75d1803519b3674cd7acf231568b7e461ca71064fa0d1180f936b2` |
+| | SGD with momentum | `9f5baec7e30edc422ce97941c1f600da9ed643cb70892b1821b1a74660417694` | `bb9775bd22f8edb3d99190f015fc25f74c3e54e36b257a4752257923795113f7` |
+| | absent (12 steps) | `ad6123c3d8b63ef377a5a170e5ccb9fee8f0231149de96d1b541dbcc030c302d` | `ece0f094e6cda5b32da95963735ccd59533fcdda35dfc58321a197deec392a14` |
+| | idle, decay after / torch (12 steps) | `f9bbdf2ac3769e419f5eee41b9479aa6edfff6cffb2b59b8a2ab4b2013b59292` / `2a8040b1464089c93726dda5bfacfb7c186ccc8ebec5dbd7b235e6c4deaf221b` | `f22326df4bbff1f8a33f8062c08f05c26d63e878f4b69213d8e700551e8deaf2` / `920cac4bb6c2f5a319549bb5fd33dc34a3dc01af85bae8980896aed83ebe98e4` |
+| CPU, Windows x86_64 | gate (AdamW) | `3b94e85f76b93c1c250415836e41b3afaf15c70294d4ac01c17550f2becae08b` | `968508fe80c79c35340ee7227044ca2242038d6b7884858c979950c2680ead83` |
+| CUDA, Windows, RTX 4060 Laptop GPU | gate (AdamW) | `3263b99095eded48b1d0cc9c69d2492b56d9dfe38573ed35f797a6132339ff49` | `4021208e74c5970b4ba0399cda524de9c497856635ab4a673066ebee72965d04` |
+| | clip 1.0 | `d481ddb36d6a9c3f1a169e67d6eda1d1b6fa6a93edd3944a4d1edf30f30de873` | `561ebc59ea9cce995956425c60e59b15d3a1049428987ffb115ab00589ff93e3` |
+| | SGD with momentum | `7650ce860e8db697d96e771ece5d20fca65c534d33353d6cc31fcb1ebf18d39c` | `d3de76efd88cc96efa82302de4f371ca789c0e6116c6960e2ab05a158d562c16` |
+| | absent (12 steps) | `7e1eb912d531b3b7288387d3cc345af8152c3a26bc53db3494e719deb32b21ad` | `849193c50a05813d679e7525acbe6a442fda046a09f3d901ba0f3f69d3e5fb1d` |
+| | idle, decay after / torch (12 steps) | `9a1a2a7a53e73db7edec9f80cc80462cab0032a3bca544dd4551726c1890b3d5` / `2a0ef10e35a0f1818b543b06c2563abf6b1c0cc57ea7c0b2fe2d92d0d3516b48` | `c5ff14a460d67746933ce01506e0ac4215dc8b8c0858285a8a649d158f22b69b` / `0ede0117a27e699212d2ab735a8ba66129924451cd3fcbf5d5d0edf3ac1eb2c7` |
+| Metal, macOS, Apple GPU | gate (AdamW) | `e261aa4cd3b1b6b9eeb4e1ba4f8699eb1f648a1c2032d9028d08a03b9918306f` | `4d1adffd836bbd93cd25e3522f02c3f856feaf6c02b64ecd9afc0086767fdc21` |
+| | clip 1.0 | `6f11db4d82361476e986921e29c8e9ab3708f41c6b6f4cef51536a41ff84ccdb` | `b43b6924c7fbe8d7ad8532ed0263a0771f81f68d3cdb6daeb72a5a3fdef84648` |
+| | SGD with momentum | `fddba9d2e0cdc2d4b5a94144349bd7f41aea395b86cdeede8de490aaa04a877e` | `4ececb232bf4c0622feeb48ec454ec35630361fb9e9095643ed017296a40bdb9` |
+| | absent (12 steps) | `0f687356977ebe24bcfb7112a71dca0202379db4398111867033d91ee30d9d2b` | `fadcaadeea04e4874251aa5d382207e702ddfdf2ac3893959f332bacc72765bf` |
+| | idle, decay after / torch (12 steps) | `cb59dbc693e34af1099073de248e629dae6536df910d1140ae60f3c99220a87e` / `7880209a33b7201f67c5c121cc5bf0e0a14dafc3c57f8ad7ad735fe71c5dea04` | `e3cde77efef90afa267f8ec96d000c873517c41f2275dc7d422f3ddbb903b9fc` / `2a9045e9af861148fbdfa1d9b5e95e2e7842598c10ca540d8cee94ad373e3ede` |
+
+Every entry is the reference's final weights (one process accumulating M micro-steps), and the runs with ranks sharing the device gave the same final weights and every per-step hash. The absent and idle runs take 12 steps (the library gates take 9 and 6), so their hashes are its own.
+
+A resume (7 steps with checkpoints every 3, then a relaunch to step 12 from step 6) gave the uninterrupted weights and every per-step hash on the Mac CPU, on Metal and on CUDA; two launchers acting as nodes on the Mac (one process each, a shared secret file, checkpoints with node copies) gave the reference's weights, and node 1's checkpoint copy was node 0's byte for byte. One GPU per rank (`--ranks-per-device 1` with more than one GPU) is untested: no multi-GPU machine was available.
+
+## Sharded data parallelism (unreleased)
+
+Status: built; tested on one machine per device kind (the CPU reference backend on macOS aarch64 at world sizes 1 and 2 and on Windows x86_64 at 1, 2 and 4; CUDA with up to four processes sharing a single CUDA GPU on Windows; Metal with two processes sharing one Apple GPU on macOS; shown: byte-identical weights and per-step hashes to data parallelism at every stage and partition, with absent gradients, an idle weight under AdamW's decay and clipping, consolidated checkpoints byte-identical to data parallelism's, and a killed run resumed from a sharded checkpoint equal to the uninterrupted run); multi-GPU, multi-machine and datacenter runs untested.
+
+`ShardedDataParallel` splits the optimizer's state, then the summed gradients, then the vars among the ranks, in the shape of ZeRO's three stages and of FSDP's full sharding, and every rank's weights stay byte for byte those of `data_parallel_step` at the same world size and micro-steps. It is opt-in: nothing else changes when it is not used.
+
+| Item | What it does |
+|---|---|
+| `ShardedDataParallel::new(group, vars, groups, options, make)` | Shards `vars` (checked equal on every rank) and builds this rank's optimizer with `make(pieces, groups)` (`\|v, g\| Adam::new(cfg, g, v)`), as for whole vars. |
+| `ShardOptions::new(stage)`, `with_partition` | `ShardStage::OptimizerState` (stage 1), `Gradients` (stage 2), `Parameters` (stage 3); `Partition::Flat` (default) or `ByVar`. Non-exhaustive, with a builder. |
+| `step`, or `grads` then `apply` | One optimizer step, like `data_parallel_step`; `grads` returns this rank's pieces of the summed gradients (`ShardGrads`) for a caller that clips them first. |
+| `ShardGrads::clip_grad_norm_per_seed`, `grad_norms_per_seed` | Clipping by the global norm per seed over the pieces of every rank: `clip_grad_norm_per_seed`'s norms, bit for bit. |
+| `full_params` | The whole vars on every rank (gathered at stage 3: FSDP's full parameters). |
+| `save_consolidated`, `restore_consolidated` | A checkpoint in `Checkpoint`'s format, the whole vars and optimizer state gathered: byte for byte data parallelism's at the same step; either kind of run resumes the other's. |
+| `save_sharded`, `load_sharded_latest`, `restore_sharded` | Every rank writes and reads its own pieces (`dist-shard-checkpoint-1`). |
+| `memory`, `record` | The bytes a rank holds (vars, summed gradient, optimizer state); the run's record with the sharding. |
+| `ShardLayout`, `Piece` | Which elements of which var each rank holds. |
+
+**Pieces.** Each rank holds a piece of every var: a range of its elements in row-major order, the ranges increasing with the rank. `Flat` cuts every var into W contiguous ranges (rank r takes `[n·r/W, n·(r+1)/W)`; FSDP's flat parameter, one per var), so the ranks hold within one element per var of an even share. `ByVar` gives every var whole to one rank: the vars from the largest, each to the least loaded rank (ties to the lowest rank), in the shape of torch's `ZeroRedundancyOptimizer`. A piece that is the whole var keeps the var's shape; any other piece is a rank-1 tensor of its elements. A var with no elements, a var that is not f32, and lazy rows, multiplier tensors or per-seed rates on a var cut into pieces are refused (they need the var's shape; `ByVar` keeps every var whole, and with it they work).
+
+**Stages.**
+1. `OptimizerState`: every rank keeps the whole vars; the gradients are all-reduced exactly as by `data_parallel_step`; each rank's optimizer steps its pieces, and the updated pieces are gathered back into every rank's vars.
+2. `Gradients`: as 1, with a reduce-scatter in place of the all-reduce: each rank receives its own pieces of the summed gradient only.
+3. `Parameters`: as 2, and between steps each rank keeps only its pieces of the vars; the whole vars are gathered at the start of a step for its micro-steps and dropped before the reduction. The whole model is gathered at once: there is no per-layer gather and free, so the peak during a step is the whole model and its micro-step gradients, as in data parallelism.
+
+**Why the bits are data parallelism's** (deterministic mode, rules 1–9 above unchanged):
+- **The reduce-scatter keeps the flat order.** It is the all-reduce's chain (rule 3): the global micro-steps folded by `GradSum` in flat (rank, micro-step) order along the ranks. Only its last step differs: the last rank sends each rank its own pieces instead of the whole total. Every element is the same fold of the same values in the same order; `Reduce::Mean` divides it by the same count (one shared routine). An all-reduce never meets a reduce-scatter: the pieces enter the layout both sides check.
+- **The optimizers are elementwise.** Adam (both decay orders, the fused GPU update included) and SGD update every element on its own, so the same operations on a piece give each element the bits they give it in the whole var.
+- **Gathering moves bits, never adds them.**
+- **Absent and idle vars.** A var no micro-step on any rank used has no sum, so every piece of it is skipped by its optimizer, AdamW's decay included, as in one process. A var used by some micro-steps only is summed with zeros in place of its absent gradients (rule 1).
+- **Clipping in single-process order.** `grad_norms_per_seed` sums each var's squares per seed in f64, element by element, then adds the vars' sums in their order. The sharded norm keeps both orders: each (var, seed) sum is one fold over the var's elements in row-major order, continued from rank to rank in rank order (the running sums pass along the ranks by broadcasts), and the sums are then added var by var. The factors multiply each piece's elements as they multiply the whole var's.
+- **The key.** The group's key (rule 6) is unchanged: in the flat order the weights do not depend on the sharding, so sharded and data-parallel runs on the same key may be compared byte for byte, and either resumes the other's consolidated checkpoint. The record names the sharding (`ShardedDataParallel::record`: `… sharding=stage-3-parameters partition=flat`). Sharding in any other order would need its own key; none is built.
+
+**Checkpoints.**
+- **Consolidated** (`save_consolidated`): every rank gathers the whole vars and optimizer state, then `Checkpoint::save` runs as for data parallelism (every rank builds the bytes, rank 0 writes, every rank verifies). Its files are data parallelism's checkpoint at the same step, byte for byte, so `Checkpoint::restore` (data parallelism) and `restore_consolidated` (sharding, any stage or partition) both resume it. It needs the whole state on every rank for the moment of the save.
+- **Sharded** (`save_sharded`): every rank writes its own pieces of the vars and of each optimizer set (`rank-<r>-params.json`, `rank-<r>-adam_m.json`, …) into one temporary folder; rank 0 writes `meta.json` (the step, the optimizer and its sets, the world size, the partition and the layout's key, the job and group keys, every cursor, each rank's state hash and each file's sha256), renames the folder into place, checks every rank's files against it and broadcasts its sha256; every rank compares it with its own meta file's; `latest` moves last. A failure on any rank fails the checkpoint on every rank. The folder must be one every rank can write (one machine, or a filesystem the ranks share).
+- **Sharded resume** (`load_sharded_latest`, `restore_sharded`): every rank loads the same meta file (checked across ranks), its own files (checked against their sha256 and its state hash); another world size, partition or layout, job key or group key, or another kind of optimizer, is refused on every rank. Stages share the pieces, so a run may resume a sharded checkpoint written at another stage with the same partition.
+
+**The gates** (deterministic mode; the gate's model, data and AdamW as in "The gate and its results"; every run a separate set of processes started by the launcher, per-step weight checks on every rank of the gathered vars). Logs: `doc/gates/e2/logs/`; scripts: `doc/gates/e2/run_gates.sh`, `doc/gates/e2/single_device_diff.sh`.
+
+Each row: final weights and every per-step hash equal to data parallelism's run at the same world size and micro-steps (12 steps unless stated), at every listed stage and partition. Hashes are the final weights' sha256.
+
+| Gate | Stages × partitions | macOS aarch64 CPU (W 1, 2) | Windows x86_64 CPU (W 1, 2, 4) | CUDA, RTX 4060 Laptop GPU (W 1, 2, 4 sharing it) | Metal, Apple GPU (W 1, 2 sharing it) |
+|---|---|---|---|---|---|
+| `gate_zero_every_stage_and_partition_equals_data_parallelism`, M 2 | 1, 2, 3 × flat, by-var (all six) | `9a24f95f50da08572824c0561890ea3213cc5076274b0cfaffe3bc6abba851d6` | `3b94e85f76b93c1c250415836e41b3afaf15c70294d4ac01c17550f2becae08b` | `3263b99095eded48b1d0cc9c69d2492b56d9dfe38573ed35f797a6132339ff49` | `e261aa4cd3b1b6b9eeb4e1ba4f8699eb1f648a1c2032d9028d08a03b9918306f` |
+| same, M 4 | all six | `02ead67c808b59bde6852388e13d48a89c257b22a8080b95549bc780f2cf1a78` | `968508fe80c79c35340ee7227044ca2242038d6b7884858c979950c2680ead83` | `4021208e74c5970b4ba0399cda524de9c497856635ab4a673066ebee72965d04` | `4d1adffd836bbd93cd25e3522f02c3f856feaf6c02b64ecd9afc0086767fdc21` |
+| `gate_zero_absent_gradients_and_an_idle_weight_equal_one_process`: absent, 9 steps, M 2 / M 4 | all six (GPU: 1 flat, 2 by-var, 3 flat) | `7c61a7994ceb0d787ef5ca45a5fd604075a5d3f21c1cf84add0cd59ee590d67c` / `0ad5e705faca0758a2d0fd8dc06a82106a99c5c3f4d1962417e0e2f27f79d3e7` | `c0e3c2da36b137d5dc2ec6c2061e926d05415484e29dbac919496b397637133b` / `6e704dcc8af711e2318f4e7561272616951d390a75c775ea5d0cf448d1538ca1` | `ed14a6550cd5773878d04a6516ab7f3c5a9ab9df6768db24c6f7f8d0c907aa1c` / `5bae8705a1f990ecfdbae8f8f19619b914347bdd753de2d0fb092cfc29ff6f60` | `055998bd589d27e9f2755f18d42c47564edb6b530010d30ed5735011ae4ddc76` / `0ef5c715415531e36d293ef4e38a109ae1026c3e3ec99a631b5f2a162e0fcf41` |
+| idle weight, decay after / torch, M 4, 6 steps (its bits untouched) | as above | `2a30f578eadf26ff812e297ddea86d0228457322d3e839197e015ce0be08638e` / `4decceea205f0f8a6581050428afc6932b0aca0390ee476137863d3df938db53` | `31c5d0b3bdceaa6d274f5816a0cd79374e4013cf2a34121049661038dd3e973d` / `db9186e5296c2eaa33116a07b378b33428f69aea16e628158ad39f27ec397d7e` | `54f777084d76890aa834b87be8c76a77a5861386c125d901935e3e0fdcf7bc2f` / `136006461c91ed08f4845a58562cc4c5a433fb40507c805f593c6d8f76d33da0` | `91867037aef3b6445fb2d246a188a2b76ead652ef5b4b8586911a7f76b3ed38a` / `f51d05efa6242d0828b2710d76ab5ab39b6e341345b70e6df770b703356c7367` |
+| `gate_zero_clipping_equals_data_parallelism`, clip 1.0 (engaged on 12 of 12 steps), M 2 / M 4 | as above | `382d20b6b7c970187cabb9909918c78cc7d4a23695de51d9d1c846fddacb99c0` / `5d4fa2a91c75d1803519b3674cd7acf231568b7e461ca71064fa0d1180f936b2` | `aa1b37445adbfc1e269380a7a84ae4cb0b8a310558ca89c0dc723f714fe215c3` / `dae9d10a3171b13c08f938804a539f946fc93f88bd54895c403bcf2b7c452034` | `d481ddb36d6a9c3f1a169e67d6eda1d1b6fa6a93edd3944a4d1edf30f30de873` / `561ebc59ea9cce995956425c60e59b15d3a1049428987ffb115ab00589ff93e3` | `6f11db4d82361476e986921e29c8e9ab3708f41c6b6f4cef51536a41ff84ccdb` / `b43b6924c7fbe8d7ad8532ed0263a0771f81f68d3cdb6daeb72a5a3fdef84648` |
+
+The absent and idle references are one process that puts zeros in place of the absent gradients and adds them with the engine's own tensor additions (no `GradSum`), as in 0.3.0's gates. The macOS CPU, CUDA and Metal hashes and the Windows clipping hashes are the ones 0.3.0 and 0.4.0 recorded; the other Windows CPU hashes were not recorded before (data parallelism gives them in the same logs).
+
+`gate_zero_consolidated_checkpoints_are_data_parallelisms`: checkpoints every 3 steps (W 2, M 2) or every 4 (W 4, M 4) of 12; every file of every checkpoint (`vars.json`, the optimizer files, `meta.json`, `latest`) byte-identical to data parallelism's: Adam at W 2 (17 files) and W 4 (13 files, not run on the Mac), SGD with momentum at W 2 (13 files); on the CPU at all six stages and partitions, on CUDA and Metal at stage 1 flat, stage 2 by-var and stage 3 flat. `consolidated_and_data_parallel_checkpoints_resume_into_each_other` (2 ranks): a data-parallel checkpoint resumed by a sharded run, and a sharded run's consolidated checkpoint resumed by data parallelism, both reach the vars of 4 straight data-parallel steps.
+
+`gate_zero_kill_and_sharded_resume_equals_the_uninterrupted_run`: sharded checkpoints; a rank paused and killed by the launcher; the job stops; the relaunch resumes from the last sharded checkpoint. Final weights and every per-step hash equal the uninterrupted sharded run's, which equals data parallelism's. Resuming the same checkpoint with one process, or with the other partition, is refused.
+
+| Case | Killed | Resumed from | macOS CPU | Windows CPU | CUDA |
+|---|---|---|---|---|---|
+| stage 3 flat, AdamW, W 2, M 2 | rank 1 at step 7 | step 6 | `9a24f95f50da08572824c0561890ea3213cc5076274b0cfaffe3bc6abba851d6` | `3b94e85f76b93c1c250415836e41b3afaf15c70294d4ac01c17550f2becae08b` | `3263b99095eded48b1d0cc9c69d2492b56d9dfe38573ed35f797a6132339ff49` |
+| stage 2 by-var, SGD with momentum, W 2, M 2 | rank 1 at step 7 | step 6 | `9f5baec7e30edc422ce97941c1f600da9ed643cb70892b1821b1a74660417694` | `2cff4c2a35d5ba1a70e9eed9b1f941174336d33d49675bc62dd9d1134c1454b2` | `7650ce860e8db697d96e771ece5d20fca65c534d33353d6cc31fcb1ebf18d39c` |
+| stage 1 flat, AdamW, W 4, M 4 | rank 2 at step 5 | step 4 | not run (2 processes at most) | `968508fe80c79c35340ee7227044ca2242038d6b7884858c979950c2680ead83` | `4021208e74c5970b4ba0399cda524de9c497856635ab4a673066ebee72965d04` |
+| stage 3 by-var, AdamW, W 4, M 4 | rank 2 at step 5 | step 4 | not run | `968508fe80c79c35340ee7227044ca2242038d6b7884858c979950c2680ead83` | not run (CPU only) |
+
+Metal ran the first two cases (`e261aa4cd3b1b6b9eeb4e1ba4f8699eb1f648a1c2032d9028d08a03b9918306f`, `fddba9d2e0cdc2d4b5a94144349bd7f41aea395b86cdeede8de490aaa04a877e`).
+
+`a_sharded_checkpoint_round_trips_byte_for_byte_and_resumes_exactly` (2 ranks; stage 3 flat under AdamW, stage 1 by-var under SGD with momentum): a sharded checkpoint loaded into a fresh run and saved again gives every file byte for byte (8 and 6 files); the restored run continued 2 steps equals 4 straight steps. `the_reduce_scatter_is_the_all_reduce_cut_into_pieces` (W 1, 2, 4; chunks of 5 and 2²⁰; absent gradients; flat and by-var) and `sharded_clipping_equals_clipping_the_whole_sum` (W 1, 2, 3, 4; norms and clipped pieces bit for bit, binding and non-binding bounds) check the two collectives at the gradient level; `sharded_steps_equal_data_parallel_steps_in_one_process` checks the vars and both Adam moments with distribution off.
+
+**Single-device and data-parallel behaviour is unchanged.** With sharding unused, every 0.3.0 and 0.4.0 gate above gives its recorded hashes (the logs in `doc/gates/e2/logs/` print them). The six single-device training configurations (a decoder, a mixture-of-experts decoder and a decoder with dropout, each under AdamW and under SGD with momentum, 60 steps, 3 models on the seed axis; final vars, logits on a fixed batch and every per-step loss) and the copy-task example print the same bytes built from 0.4.0 and from this change (`doc/gates/e2/single_device_diff.sh`, `doc/gates/e2/single_device_probe.rs`), on the CPU reference backend (macOS aarch64, Windows x86_64), on CUDA and on Metal. Outside `nn::dist` nothing changes; inside it, `GradSum::finish` now calls the scaling routine it shares with the reduce-scatter (the same operations), and the all-reduce's chain gained the reduce-scatter's last step behind a parameter.
+
+**Where it ran.** The Mac was shared with a long benchmark: its runs used at most 2 processes at once, at background priority, so world size 4 ran on Windows only (CPU and CUDA). Windows ran every gate with no skips, under rustc 1.94.1.
+
+**Memory per rank** (`sharding_divides_the_optimizer_state_gradients_and_vars`; the gate's model, 43,840 f32 elements = 175,360 bytes of vars; Adam's state is two moments, 350,720 bytes; after one step; bytes per rank, rank 0 first). Data parallelism holds, on every rank, 175,360 bytes of vars, 175,360 of summed gradient and 350,720 of optimizer state.
+
+| Stage, partition | W 2: vars / summed gradient / optimizer state | W 4: vars / summed gradient / optimizer state |
+|---|---|---|
+| 1, flat | 175,360 / 175,360 / 175,360 each | 175,360 / 175,360 / 87,680 each |
+| 2, flat | 175,360 / 87,680 / 175,360 each | 175,360 / 43,840 / 87,680 each |
+| 3, flat | 87,680 / 87,680 / 175,360 each | 43,840 / 43,840 / 87,680 each |
+| 1, by-var | 175,360 / 175,360 / 176,128 and 174,592 | 175,360 / 175,360 / 90,112, 90,112, 86,016, 84,480 |
+| 2, by-var | 175,360 / 88,064 and 87,296 / 176,128 and 174,592 | 175,360 / 45,056, 45,056, 43,008, 42,240 / 90,112, 90,112, 86,016, 84,480 |
+| 3, by-var | 88,064 and 87,296 / the same / 176,128 and 174,592 | 45,056, 45,056, 43,008, 42,240 / the same / 90,112, 90,112, 86,016, 84,480 |
+
+With flat pieces each rank's optimizer state is exactly 1/W of data parallelism's (0.500 at W 2, 0.250 at W 4); by var, the largest rank holds 0.502 and 0.257 (the vars are whole, so the split is only as even as their sizes). The rows sum to data parallelism's bytes: the state is split, not copied. Measured from the tensors each rank holds (`ShardedDataParallel::memory`), in `sharding_divides_the_optimizer_state_gradients_and_vars` on Windows (all world sizes) and on the Mac (W 1 and 2).
+
+Not counted: each micro-step's own gradients, which are whole on every rank at every stage (a rank after the first keeps its k micro-steps' gradients until the running sum arrives, as in data parallelism), the whole sum the last rank holds during the reduction, and the whole vars a stage-3 step gathers.
+
+**Refusals:** a sharded checkpoint resumed at another world size or with another partition (refused on every rank, in the gates and in `a_sharded_checkpoint_round_trips_byte_for_byte_and_resumes_exactly`), a changed byte in another rank's file (both ranks refuse), ranks that start from different vars, a var that is not f32, per-seed rates on vars cut into pieces (`sharding_refuses_what_its_pieces_cannot_hold`).
+
+**Untested and not built.** Multi-GPU, multi-machine and datacenter runs; a sharded checkpoint on a filesystem shared by several machines; per-layer gathering (FSDP's units), prefetching and overlap; offloading to the host; mixed precision; a sharded checkpoint resumed at another world size (refused); sharding in an order other than the flat one.
+
 ## Single-device behaviour is unchanged
 
 - No existing file changes behaviour. The changes outside `nn::dist`: the module line in `nn/mod.rs`, a new error variant `NnError::Dist` (kind "dist"), two examples, this note and a README bullet.
@@ -206,6 +341,7 @@ These gates show the order of the sum and the checkpoint path on a GPU. They do 
 
 - adds the variant NnError::Dist
 - public API additions (`nn::dist`, among them `GroupOptions` with public fields `platform` and `secret`, `JobSecret`, `platform_key`, `LaunchConfig::secret`): a public API change, so the release carrying them needs a minor version bump
+- unreleased (sharding): `ShardedDataParallel`, `ShardOptions` (non-exhaustive, with a builder), `ShardStage`, `Partition`, `ShardGrads`, `ShardLayout`, `Piece`, `ShardMemory`, `ShardCheckpoint`, `ShardCheckpointMeta`, `ShardRank`, `SHARD_CHECKPOINT_FORMAT`; a new message kind on the wire (the reduce-scatter's result; data parallelism's messages are unchanged); the example `ddp_gate`
 - 0.4.0 (GPU ranks): `GroupOptions` gains the public field `device` and is `#[non_exhaustive]` with a builder (`new`, `with_*`; struct literals no longer compile outside the crate); `DeviceKind`, `DistEnv::device`, `device_key`, `ProcessGroup::device` and `ProcessGroup::platform`, `data_parallel_grads`, `CheckpointOptimizer`, `Sgd::set_buffers`, `tensor::gpu_platform_key`; `Checkpoint::save` and `restore` take any `CheckpointOptimizer` (Adam or SGD), `Checkpoint` holds `optimizer_state` in place of `adam_m` and `adam_v`, and `CheckpointMeta` gains `optimizer`; NVML is loaded at run time and `device_key` is an error without it; `Cuda(i)` with i > 0 is accepted (one device per process, untested) where 0.3.0 refused it; a resume under another group key, or into another kind of optimizer, is refused
 
 ## Known limits and next steps
@@ -216,4 +352,4 @@ These gates show the order of the sum and the checkpoint path on a GPU. They do 
 - **Throughput.** The running sum passes the ranks one after another (latency rises with W) and the last rank sends the total to each rank (its traffic rises with W). Both keep the order; a tree or ring broadcast of the total, bucketing and overlap with the backward pass are later work and must not change the order of the additions.
 - **Memory.** A rank after the first keeps its k micro-step gradients until the running sum arrives (k copies of the gradients; with one micro-step per rank, none extra).
 - **Checkpoints.** Rank 0 is the single writer; node copies are optional and checked. The optimizer states saved are Adam's and SGD's (SGD's since 0.4.0); another optimizer cannot be checkpointed (it does not implement `CheckpointOptimizer`).
-- **Not yet built:** reduce-scatter, sharded optimizer state and parameters (FSDP-style), elastic restart, a fast mode, generic callbacks (batch seen, checkpoint reached), NCCL.
+- **Not yet built:** elastic restart, a fast mode, generic callbacks (batch seen, checkpoint reached), NCCL.
