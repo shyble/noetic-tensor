@@ -913,15 +913,29 @@ impl Tensor {
     #[track_caller]
     pub fn matmul(self, rhs: Tensor) -> Tensor {
         ok(infer::matmul(&self.layout.shape, &rhs.layout.shape).map(drop));
-        self.matmul_raw(rhs)
+        // The calling thread's precision on a GPU (`set_matmul_precision`); f32 on the CPU.
+        let precision = if matches!(self.device, super::device::Device::Cpu(_)) { super::precision::MatmulPrecision::F32 } else { super::precision::matmul_precision() };
+        self.matmul_raw(rhs, precision)
+    }
+
+    /// `matmul` at a named precision (`MatmulPrecision`), whatever the thread's setting; its
+    /// backward products take the same precision. `MatmulPrecision::Half` on a CPU tensor is
+    /// refused (the CPU backends multiply in f32 only).
+    #[track_caller]
+    pub fn matmul_with(self, rhs: Tensor, precision: super::precision::MatmulPrecision) -> Tensor {
+        ok(infer::matmul(&self.layout.shape, &rhs.layout.shape).map(drop));
+        if precision != super::precision::MatmulPrecision::F32 && matches!(self.device, super::device::Device::Cpu(_)) {
+            ok::<()>(Err(super::precision::cpu_refusal(self.device)));
+        }
+        self.matmul_raw(rhs, precision)
     }
 
     #[track_caller]
-    fn matmul_raw(self, rhs: Tensor) -> Tensor {
+    fn matmul_raw(self, rhs: Tensor, precision: super::precision::MatmulPrecision) -> Tensor {
         ok(infer::matmul(&self.layout.shape, &rhs.layout.shape).map(drop));
         ok(infer::same_device(self.device, rhs.device));
         ok(infer::same_dtype(self.dtype(), rhs.dtype(), "matmul"));
-        let (st, sh) = gpu::gpu_matmul(&self, &rhs).unwrap_or_else(|| fdisp!(self.dtype(), T => {
+        let (st, sh) = gpu::gpu_matmul(&self, &rhs, precision).unwrap_or_else(|| fdisp!(self.dtype(), T => {
             let (v, sh) = self.be_matmul(&self.vals::<T>(), &self.layout.shape, &rhs.vals::<T>(), &rhs.layout.shape);
             (Storage::from_vec(v), sh)
         }));
@@ -932,12 +946,12 @@ impl Tensor {
             boxed(move |g, n| {
                 let lhs_grad = n[0].then(|| {
                     let rt = r.clone().transpose();
-                    let g = g.clone().matmul_raw(rt);
+                    let g = g.clone().matmul_raw(rt, precision);
                     if broadcast { unbroadcast(g, &ls) } else { g }
                 });
                 let rhs_grad = n[1].then(|| {
                     let lt = l.clone().transpose();
-                    let g = lt.matmul_raw(g.clone());
+                    let g = lt.matmul_raw(g.clone(), precision);
                     if broadcast { unbroadcast(g, &rs) } else { g }
                 });
                 vec![lhs_grad, rhs_grad]
