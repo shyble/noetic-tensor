@@ -1,5 +1,5 @@
 # examples/ddp_gate.rs references, mac-metal: device metal, ranks sharing the device, at most 2 processes at once
-# rustc 1.94.1; Darwin arm64; 2026-10-14T22:37:58Z
+# rustc 1.94.1; Darwin arm64; 2026-10-15T02:24:14Z
 gate M 2 reference (1 process, 2 accumulation micro-steps): final weights sha256 e261aa4cd3b1b6b9eeb4e1ba4f8699eb1f648a1c2032d9028d08a03b9918306f
 gate M 2 W 2 (2 ranks sharing the device): final weights sha256 e261aa4cd3b1b6b9eeb4e1ba4f8699eb1f648a1c2032d9028d08a03b9918306f; every per-step hash and the final weights equal the reference: yes
 gate M 4 reference (1 process, 4 accumulation micro-steps): final weights sha256 4d1adffd836bbd93cd25e3522f02c3f856feaf6c02b64ecd9afc0086767fdc21
@@ -32,5 +32,5 @@ sgd M 4 W 2 (2 ranks sharing the device): final weights sha256 4ececb232bf4c0622
 sgd M 4 W 4: SKIPPED (4 processes at once, at most 2)
 resume W 2 M 2 (checkpoint of step 6, relaunched to step 12): final weights sha256 e261aa4cd3b1b6b9eeb4e1ba4f8699eb1f648a1c2032d9028d08a03b9918306f; equals the reference and every per-step hash: yes
 2 nodes x 1 process on localhost, node copies: final weights sha256 e261aa4cd3b1b6b9eeb4e1ba4f8699eb1f648a1c2032d9028d08a03b9918306f; equals the reference, and node 1's checkpoint copy is node 0's byte for byte: yes
-run record: record mode=deterministic order=flat-rank backend=tcp platform=macos-aarch64-neon-rustc_1.94.1-matrixmultiply-0.3.11 libm=<sha256> device=metal-<the GPU's name>-mathmode-safe-kernels-<hex>-family-apple7-metal4-mac2-arch-applegpu_g13s-macos-Version_27.0.1__Build_26A434_ world=2 auth=hmac-sha256 weight_checks=13 ok last_weights=e261aa4cd3b1b6b9eeb4e1ba4f8699eb1f648a1c2032d9028d08a03b9918306f
-# ended 2026-10-14T22:38:28Z, all identical
+run record: record mode=deterministic order=flat-rank backend=tcp platform=macos-aarch64-neon-rustc_1.94.1-matrixmultiply-0.3.11 libm=<sha256> device=metal-<the GPU name>-mathmode-safe-kernels-<hex>-family-apple7-metal4-mac2-arch-applegpu_g13s-macos-Version_27.0.1__Build_26A434_ world=2 auth=hmac-sha256 weight_checks=13 ok last_weights=e261aa4cd3b1b6b9eeb4e1ba4f8699eb1f648a1c2032d9028d08a03b9918306f
+# ended 2026-10-15T02:24:46Z, all identical

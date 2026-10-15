@@ -1,5 +1,5 @@
 # examples/ddp_gate.rs references, mac-cpu: device cpu, ranks sharing the device, at most 2 processes at once
-# rustc 1.94.1; Darwin arm64; 2026-10-14T22:37:33Z
+# rustc 1.94.1; Darwin arm64; 2026-10-15T02:16:56Z
 gate M 2 reference (1 process, 2 accumulation micro-steps): final weights sha256 9a24f95f50da08572824c0561890ea3213cc5076274b0cfaffe3bc6abba851d6
 gate M 2 W 2 (2 ranks sharing the device): final weights sha256 9a24f95f50da08572824c0561890ea3213cc5076274b0cfaffe3bc6abba851d6; every per-step hash and the final weights equal the reference: yes
 gate M 4 reference (1 process, 4 accumulation micro-steps): final weights sha256 02ead67c808b59bde6852388e13d48a89c257b22a8080b95549bc780f2cf1a78
@@ -33,4 +33,4 @@ sgd M 4 W 4: SKIPPED (4 processes at once, at most 2)
 resume W 2 M 2 (checkpoint of step 6, relaunched to step 12): final weights sha256 9a24f95f50da08572824c0561890ea3213cc5076274b0cfaffe3bc6abba851d6; equals the reference and every per-step hash: yes
 2 nodes x 1 process on localhost, node copies: final weights sha256 9a24f95f50da08572824c0561890ea3213cc5076274b0cfaffe3bc6abba851d6; equals the reference, and node 1's checkpoint copy is node 0's byte for byte: yes
 run record: record mode=deterministic order=flat-rank backend=tcp platform=macos-aarch64-neon-rustc_1.94.1-matrixmultiply-0.3.11 libm=<sha256> world=2 auth=hmac-sha256 weight_checks=13 ok last_weights=9a24f95f50da08572824c0561890ea3213cc5076274b0cfaffe3bc6abba851d6
-# ended 2026-10-14T22:37:54Z, all identical
+# ended 2026-10-15T02:17:15Z, all identical
