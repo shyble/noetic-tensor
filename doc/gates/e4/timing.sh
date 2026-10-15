@@ -23,7 +23,9 @@ mkdir -p "$work" "$here/logs"
 if command -v taskpolicy > /dev/null; then prio="taskpolicy -b"; else prio="nice -n 10"; fi
 hw() {
   if [ "$(uname -s)" = Darwin ]; then
-    echo "$(sysctl -n machdep.cpu.brand_string), $(sysctl -n hw.ncpu) logical CPUs, $(($(sysctl -n hw.memsize) / 1073741824)) GiB, $(sysctl -n hw.model); $(sw_vers -productName) $(sw_vers -productVersion)"
+    # The model identifier names the machine; macOS runs background-priority work on the
+    # efficiency cores.
+    echo "Apple silicon, model $(sysctl -n hw.model), $(sysctl -n hw.perflevel0.logicalcpu) performance and $(sysctl -n hw.perflevel1.logicalcpu) efficiency cores, $(($(sysctl -n hw.memsize) / 1073741824)) GiB; $(sw_vers -productName) $(sw_vers -productVersion)"
   else
     uname -a
   fi
@@ -32,7 +34,7 @@ load() { uptime | sed 's/.*load average[s]*: //'; }
 {
   echo "# E4 gate 2, timing, $label: device $device; $(hw)"
   echo "# $(rustc --version | sed 's/ (.*//'); $(uname -sm); $(date -u +%Y-%m-%dT%H:%M:%SZ); load average at the start: $(load)"
-  echo "# model: width $D, $L blocks, MLP $F; $M global micro-steps; $N steps; $R runs per configuration, in rotation; ranks at background priority, sharing the device"
+  echo "# model: width $D, $L blocks, MLP $F; $M global micro-steps; $N steps; $R runs per configuration, in rotation; every process at background priority ($prio), sharing the device"
   echo "# a measurement on this machine, with its key; not a statement about other hardware, networks or engines"
 } > "$log"
 size="--width $D --blocks $L --mlp $F --micro $M --steps $N"
