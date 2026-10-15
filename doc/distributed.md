@@ -1,10 +1,10 @@
 # Distributed training: deterministic data parallelism, and a fast mode
 
-Released in 0.3.0 (9 October 2026) for the CPU. Released in 0.4.0 (10 October 2026): ranks on a GPU, one device per rank (see "GPU ranks" below); built; tested on one machine per GPU kind (CUDA: up to four processes sharing a single CUDA GPU on Windows; Metal: two processes sharing one Apple GPU on macOS; shown: byte-identical weights to one GPU with accumulation, with absent gradients, an idle weight under decay, clipping, and a killed and resumed run under AdamW and under SGD with momentum); multi-GPU, multi-machine and datacenter runs untested. Released in 0.5.0 (15 October 2026): sharded data parallelism and the gate as an example binary with one device per rank (see those sections below), and the engine and wire-protocol versions at the rendezvous; built; tested on one machine per device kind; multi-GPU, multi-machine and datacenter runs untested. Released in 0.6.0 (15 October 2026): a fast mode, opt-in, under its own key and never pooled with the deterministic mode (see "Fast mode" below), and mixed precision (see `doc/mixed_precision.md`); built; tested on one machine per device kind; multi-GPU, multi-machine and datacenter runs untested.
+Released in 0.3.0 (9 October 2026) for the CPU. Released in 0.4.0 (10 October 2026): ranks on a GPU, one device per rank (see "GPU ranks" below); built; tested on one machine per GPU kind (CUDA: up to four processes sharing a single CUDA GPU on Windows; Metal: two processes sharing one Apple GPU on macOS; shown: byte-identical weights to one GPU with accumulation, with absent gradients, an idle weight under decay, clipping, and a killed and resumed run under AdamW and under SGD with momentum); multi-GPU, multi-machine and datacenter runs untested. Released in 0.5.0 (15 October 2026): sharded data parallelism and the gate as an example binary with one device per rank (see those sections below), and the engine and wire-protocol versions at the rendezvous; built; tested on one machine per device kind; multi-GPU, multi-machine and datacenter runs untested. Released in 0.6.0 (15 October 2026): a fast mode, opt-in, under its own key and never pooled with the deterministic mode (see "Fast mode" below), and mixed precision (see `doc/mixed_precision.md`); built; tested on one machine per device kind; multi-GPU, multi-machine and datacenter runs untested. After 0.6.0's release the deterministic mode was tested on two GPUs in one machine and on two machines with one GPU each (see "Two GPUs in one machine, and two machines"); the fast mode and mixed precision were not.
 
 ## What it adds
 
-`noetic::nn::dist`: data-parallel training across processes (tested on one machine; multi-machine runs are untested), with an API in the shape of torch.distributed, DDP and torchrun. Standard library only (`std::net`, `std::process`); no new dependency.
+`noetic::nn::dist`: data-parallel training across processes (tested on one machine, and on two machines with one GPU each; larger configurations untested), with an API in the shape of torch.distributed, DDP and torchrun. Standard library only (`std::net`, `std::process`); no new dependency.
 
 | Item | What it does |
 |---|---|
@@ -133,11 +133,11 @@ The whole gate (27 distributed tests, plus the HMAC vectors) runs in about 5 s: 
 
 ## GPU ranks (0.4.0)
 
-Status: built; tested on one machine per GPU kind (the configurations and results below); multi-GPU, multi-machine and datacenter runs untested. GPU results are keyed apart from CPU results and are never compared byte for byte with them.
+Status: built; tested on one machine per GPU kind (the configurations and results below), and after 0.6.0's release on two L4 GPUs in one machine and on two machines with one L4 each (see "Two GPUs in one machine, and two machines"); larger configurations untested. GPU results are keyed apart from CPU results and are never compared byte for byte with them.
 
 **What changes.**
 - **One device per rank.** `DistEnv::device(kind, ranks_per_device)` gives the rank's device from its rank on the node (`LOCAL_RANK`), as torchrun's `cuda:LOCAL_RANK`: `Cuda(LOCAL_RANK / ranks_per_device)`, `Metal(…)` likewise, or `Cpu(Reference)`. With `ranks_per_device` 1 each rank has its own GPU; with more, that many ranks share one (how the gates below run on one GPU). `GroupOptions::device` is the rank's device; `data_parallel_step` refuses vars that are not on it.
-- **The CUDA backend runs on `Cuda(i)`**, one device per process: the first use fixes the process's device (`Cuda(0)` unless another is named first); another device afterwards is refused. A device the machine does not have is refused without fixing anything. Only `Cuda(0)` was available to test: `Cuda(i)` for i > 0 is untested, and results that must be exact should not rely on it until a gate on two GPUs in one machine passes.
+- **The CUDA backend runs on `Cuda(i)`**, one device per process: the first use fixes the process's device (`Cuda(0)` unless another is named first); another device afterwards is refused. A device the machine does not have is refused without fixing anything. `Cuda(1)` was tested on two L4 GPUs in one machine after 0.6.0's release: the gate's training on `Cuda(1)` equalled `Cuda(0)`'s, and two ranks, one per GPU, equalled one GPU with accumulation (see "Two GPUs in one machine, and two machines"). `Cuda(i)` for i > 1 is untested.
 - **The sum is 0.3.0's.** Each micro-step's gradients are copied from the device to the host as f32, summed by `GradSum` in the flat rank order (rules 1–3, unchanged), and the sum goes back to the device, where every rank takes the same optimizer step. Correct, not fast: overlap and bucketing are later work and must keep the order.
 - **The key.** `device_key(device)`: none for `Cpu(Reference)` (the CPU key is 0.3.0's, unchanged), else `device=` and `tensor::gpu_platform_key(device)`, which is `gpu_key(device)` (unchanged) followed by what the results depend on outside this crate:
   - CUDA: the GPU's name and compute capability, the CUDA version the driver supports (`driver…`), NVRTC's version, the kernel options, the kernel source's hash, and the driver's release (`driver-release-…`; the driver compiles the kernels' PTX). The release is read through NVML, the driver's management library, loaded at run time (`nvml.dll`, `libnvidia-ml.so.1`), not linked: the `cuda` feature builds, and a process trains on one GPU, where NVML is missing (some containers lack it). There `device_key` is an error: a GPU key is never made without the driver's release (`cuda_a_missing_nvml_refuses_the_key_but_not_the_device`). On the test machine: `device=cuda-NVIDIA_GeForce_RTX_4060_Laptop_GPU-sm89-driver13040-nvrtc12.6-nofastmath-fmadoff-kernels-<16 hex digits of the kernel source's sha256>-driver-release-617.14`.
@@ -240,7 +240,7 @@ On the CPU it reproduces the gates' recorded weights (`9a24f95f50da08572824c0561
 
 Every entry is the reference's final weights (one process accumulating M micro-steps), and the runs with ranks sharing the device gave the same final weights and every per-step hash. The absent and idle runs take 12 steps (the library gates take 9 and 6), so their hashes are its own.
 
-A resume (7 steps with checkpoints every 3, then a relaunch to step 12 from step 6) gave the uninterrupted weights and every per-step hash on the Mac CPU, on Metal and on CUDA; two launchers acting as nodes on the Mac (one process each, a shared secret file, checkpoints with node copies) gave the reference's weights, and node 1's checkpoint copy was node 0's byte for byte. One GPU per rank (`--ranks-per-device 1` with more than one GPU) is untested.
+A resume (7 steps with checkpoints every 3, then a relaunch to step 12 from step 6) gave the uninterrupted weights and every per-step hash on the Mac CPU, on Metal and on CUDA; two launchers acting as nodes on the Mac (one process each, a shared secret file, checkpoints with node copies) gave the reference's weights, and node 1's checkpoint copy was node 0's byte for byte. One GPU per rank (`--ranks-per-device 1`) was tested after 0.6.0's release, on two L4 GPUs in one machine and across two machines with one L4 each (see "Two GPUs in one machine, and two machines").
 
 ## Sharded data parallelism (0.5.0)
 
@@ -330,7 +330,7 @@ Not counted: each micro-step's own gradients, which are whole on every rank at e
 
 **Refusals:** a sharded checkpoint resumed at another world size or with another partition (refused on every rank, in the gates and in `a_sharded_checkpoint_round_trips_byte_for_byte_and_resumes_exactly`), a changed byte in another rank's file (both ranks refuse), ranks that start from different vars, a var that is not f32, per-seed rates on vars cut into pieces (`sharding_refuses_what_its_pieces_cannot_hold`).
 
-**Untested and not built.** Multi-GPU, multi-machine and datacenter runs; a sharded checkpoint on a filesystem shared by several machines; per-layer gathering (FSDP's units), prefetching and overlap; offloading to the host; mixed precision; a sharded checkpoint resumed at another world size (refused); sharding in an order other than the flat one.
+**Untested and not built.** Sharding on more than two GPUs, or across machines (two L4 GPUs in one machine were tested after 0.6.0's release, stages 1–3 with flat pieces: see "Two GPUs in one machine, and two machines"); a sharded checkpoint on a filesystem shared by several machines; per-layer gathering (FSDP's units), prefetching and overlap; offloading to the host; mixed precision; a sharded checkpoint resumed at another world size (refused); sharding in an order other than the flat one.
 
 ## Fast mode (released in 0.6.0)
 
@@ -389,6 +389,43 @@ On this machine and load the fast mode's medians are within 3% of the determinis
 
 See `doc/mixed_precision.md`. A group made while the thread's matmul precision is `Half` records it, and its key's device part names the reduced-precision product, in either mode; every data-parallel or sharded step checks that the thread multiplies at the group's precision. The mixed steps scale the loss by a static power of two, scale the summed gradients (or a rank's pieces) back, and skip the optimizer step on every rank when a gradient on any rank is not finite. Within a mixed key, two-rank data parallelism and two-rank sharded training (stage 2, flat) gave one process's weights bit for bit on CUDA and Metal (the gate's model, 12 steps); other world sizes, stages and partitions under mixed precision are untested. Never compared with f32.
 
+## Two GPUs in one machine, and two machines (after 0.6.0's release)
+
+Tested on rented cloud machines, with each setup's key below:
+- 2 L4 GPUs in one machine (driver 580.126.09): data-parallel with one rank per GPU (world size 2) and two ranks per GPU (world size 4), and sharded (stages 1–3, world size 2), equal to one GPU with accumulation;
+- 2 machines with one L4 each over a private network (driver 595.91.07): data-parallel with one GPU each (world size 2) and on the CPU (world sizes 2 and 4), equal to one machine.
+
+Deterministic path only. Untested: more than 2 GPUs or 2 machines, other GPU models and drivers, NCCL, and the fast mode, half-precision products and mixed precision on these machines.
+
+These runs used the 0.6.0 release unchanged, with every 0.6.0 option off: the fast mode, the half-precision products and mixed precision were not tested on these machines, and their own tests were skipped by name (`fast_tests`, `mixed_tests`, `half_gemm`). Sharding was tested on two GPUs in one machine only, not across machines. Each result holds for its own key below; the two setups' keys differ (driver, CPU features), and no result is pooled across them.
+
+### Two L4 GPUs in one machine
+
+**The key.** NVIDIA L4 × 2 (sm89, 24 GB), NVIDIA driver 580.126.09 (CUDA driver API 13.0), CUDA toolkit 12.8 (NVRTC 12.8.93, cuBLAS 12.8.4.1), Ubuntu 24.04.3, an AMD EPYC 7542 host (avx, avx2, fma), rustc 1.94.1. Platform key `linux-x86_64-avx+avx2+fma-rustc_1.94.1-matrixmultiply-0.3.11` with its maths-library fingerprint; device key `cuda-NVIDIA_L4-sm89-driver13000-nvrtc12.8-nofastmath-fmadoff-kernels-` and the first 16 characters of the CUDA kernel source's sha256 (aa58ccd1173439a053ba1ddd91326d3c6f33804a072a7a168c84a038f099e60c). The ranks reach each other on the machine's loopback address.
+
+**Shown** (the gate's model, 12 steps; "equal" means every per-step weight hash on every rank and the final weights byte-identical):
+- the engine's tests, CPU and CUDA: all passed (the CUDA tests with every rank on `Cuda(0)`, as on one GPU);
+- the probe twice on each GPU, byte-identical; the gate's training on `Cuda(0)` and on `Cuda(1)`, equal;
+- 2 ranks, one per GPU (`--ranks-per-device 1`), against one process on `Cuda(0)` with 2 micro-steps: equal, in each configuration (the gate's AdamW with dropout keyed by the global micro-step; absent gradients with an idle weight under decay; clipping at 1.0; SGD with momentum);
+- 4 ranks, two per GPU, against one process with 4 micro-steps: equal;
+- 2 ranks on 2 GPUs with checkpoints every 3 steps, rank 1 killed before step 7, the relaunch resumed from step 6: equal to the uninterrupted run;
+- sharded at stages 1, 2 and 3 (flat pieces), 2 ranks on 2 GPUs: equal to the two-rank data-parallel run;
+- CPU data parallelism at 1, 2 and 4 processes: one final-weights hash.
+
+### Two machines with one L4 each
+
+**The key.** On each machine: NVIDIA L4 × 1 (sm89), NVIDIA driver 595.91.07 (CUDA driver API 13.2), the same toolkit, Ubuntu 24.04.3, an AMD EPYC 9554 host (avx, avx2, fma, avx512f), rustc 1.94.1. Both machines had the same platform key (`linux-x86_64-avx+avx2+fma+avx512f-rustc_1.94.1-matrixmultiply-0.3.11` with its maths-library fingerprint) and the same device key (`cuda-NVIDIA_L4-sm89-driver13020-nvrtc12.8-nofastmath-fmadoff-kernels-`, as above). The machines were in one data centre, on a private network. The rendezvous and the data listeners were bound to the private address, a connection to the first machine's public address at the rendezvous port was refused, and every rank authenticated with HMAC-SHA256 over a per-job secret.
+
+**Shown:**
+- on each machine, twice identical: CPU `ddp_copy_task` with 4 micro-steps, and the GPU gate at one GPU with 2 micro-steps in each configuration;
+- CPU data parallelism across the machines, 1 process per machine (world size 2) and 2 per machine (world size 4): every rank's final weights equal to one process with accumulation; the group record of world size 2 says `auth=hmac-sha256`;
+- the GPU gate across the machines, 1 GPU per machine (world size 2), against one GPU with 2 micro-steps on one machine: equal, in each configuration;
+- rank 1 (the second machine) killed before step 7, the relaunch resumed from step 6: equal to the uninterrupted run on both ranks; the second machine's checkpoint copy byte-identical to the first's;
+- refused on every rank before step 0: a rank with another job secret, a rank with none, and a CPU rank in a GPU job;
+- every rank checked every rank's data-shard hash against its own computation.
+
+**Not shown.** No step time is given here: these runs measured whether the result changes across GPUs and machines, not speed, and two GPUs or two machines say nothing about larger configurations.
+
 ## Single-device behaviour is unchanged
 
 - No existing file changes behaviour. The changes outside `nn::dist`: the module line in `nn/mod.rs`, a new error variant `NnError::Dist` (kind "dist"), two examples, this note and a README bullet.
@@ -410,9 +447,9 @@ See `doc/mixed_precision.md`. A group made while the thread's matmul precision i
 ## Known limits and next steps
 
 - **f32 gradients only.** f64, f16 and bf16 gradients are refused by `GradSum`. bf16 with f32 master weights comes with mixed precision.
-- **Tested on one machine per device kind.** GPU gradients are copied to the host for the sum (correct, not fast). The GPU gates ran two processes on one GPU; multi-GPU and multi-machine runs need the later gates (1 node × 2 GPUs, 2 nodes × 1 GPU, against 1 GPU × 2 micro-steps).
+- **Tested on two GPUs and on two machines, no more.** GPU gradients are copied to the host for the sum (correct, not fast). After 0.6.0's release the deterministic mode passed the gates of 1 node × 2 GPUs and 2 nodes × 1 GPU against 1 GPU × 2 micro-steps, each on its own key (see "Two GPUs in one machine, and two machines"); more GPUs, more machines and other GPU models are untested.
 - **The OS maths library.** softmax, log_softmax and `powf` call the platform's `exp`, `log` and `pow`, whose last bits may differ between operating systems or library versions. The gate runs on one machine, so it is unaffected. Between machines, the rendezvous refuses ranks whose maths library fingerprint differs (the fingerprint samples the functions on fixed inputs; it can miss a difference elsewhere, which `check_in_sync` then reports as an error rather than letting the ranks drift). Mixed-platform jobs need the engine's own implementations of these functions.
 - **Throughput (deterministic mode).** The running sum passes the ranks one after another (latency rises with W) and the last rank sends the total to each rank (its traffic rises with W). Both keep the order; a tree or ring broadcast of the total, bucketing and overlap with the backward pass in this mode are later work and must not change the order of the additions. The fast mode has buckets, a ring and overlap, under its own key.
 - **Memory.** A rank after the first keeps its k micro-step gradients until the running sum arrives (k copies of the gradients; with one micro-step per rank, none extra).
 - **Checkpoints.** Rank 0 is the single writer; node copies are optional and checked. The optimizer states saved are Adam's and SGD's (SGD's since 0.4.0); another optimizer cannot be checkpointed (it does not implement `CheckpointOptimizer`).
-- **Not yet built:** elastic restart, generic callbacks (batch seen, checkpoint reached), NCCL (later, after a two-machine gate). The fast mode and mixed precision are built and released in 0.6.0 (see "Fast mode" and `doc/mixed_precision.md`).
+- **Not yet built:** elastic restart, generic callbacks (batch seen, checkpoint reached), NCCL (later, as an opt-in under its own key, never pooled with the deterministic mode; the two-machine gate it waited for has passed). The fast mode and mixed precision are built and released in 0.6.0 (see "Fast mode" and `doc/mixed_precision.md`).
