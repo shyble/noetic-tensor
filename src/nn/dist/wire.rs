@@ -29,6 +29,10 @@ pub(crate) enum Op {
     Challenge = 11,
     LinkAck = 12,
     ScatterResult = 13,
+    /// The fast mode's ring: a segment's running sum (reduce-scatter phase).
+    RingReduce = 14,
+    /// The fast mode's ring: a reduced segment passed on (all-gather phase).
+    RingGather = 15,
 }
 
 impl Op {
@@ -45,11 +49,13 @@ impl Op {
             Op::Challenge => "challenge",
             Op::LinkAck => "link answer",
             Op::ScatterResult => "reduce-scatter result",
+            Op::RingReduce => "fast ring reduce",
+            Op::RingGather => "fast ring gather",
         }
     }
 
     fn from_u32(v: u32) -> Option<Op> {
-        [Op::Hello, Op::Table, Op::Link, Op::Barrier, Op::Broadcast, Op::Gather, Op::ReduceMeta, Op::ReduceChunk, Op::ResultMeta, Op::ResultChunk, Op::Challenge, Op::LinkAck, Op::ScatterResult].into_iter().find(|o| *o as u32 == v)
+        [Op::Hello, Op::Table, Op::Link, Op::Barrier, Op::Broadcast, Op::Gather, Op::ReduceMeta, Op::ReduceChunk, Op::ResultMeta, Op::ResultChunk, Op::Challenge, Op::LinkAck, Op::ScatterResult, Op::RingReduce, Op::RingGather].into_iter().find(|o| *o as u32 == v)
     }
 }
 

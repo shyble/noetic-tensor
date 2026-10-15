@@ -34,9 +34,16 @@
 //!   `--node-copies` (the first rank of every other node keeps a copy in its own `--ckpt-dir`);
 //! - `--pause R:S`: rank R stops before step S and waits to be killed (for kill-and-resume gates);
 //! - `--cpu-ranks R,…`: those ranks train on the CPU (a mixed job, which the rendezvous refuses);
-//! - `--out DIR`, `--job-key K` [ddp gate].
+//! - `--out DIR`, `--job-key K` [ddp gate];
+//! - `--fast`: the fast mode (`DistMode::Fast`: per-rank sums, buckets, a ring all-reduce,
+//!   overlap with the backward pass; its own key; not reproducible bit for bit), with
+//!   `--bucket-kb N` [25600] and `--no-overlap`;
+//! - `--losses`: rank 0 prints each step's mean loss over the global micro-steps
+//!   (`loss <step> <value>`; an all-gather of the ranks' losses, after the step's reduction);
+//! - `--width D` [32], `--blocks L` [2], `--mlp F` [64]: a larger decoder (for timing); the
+//!   defaults are the gate's model. Rank 0 prints the training loop's wall time (`wall <seconds>`).
 
-use noetic::nn::dist::{check_in_sync, data_parallel_grads, data_parallel_step, state_hash, Checkpoint, CheckpointOptimizer, DeviceKind, DistEnv, GroupOptions, ProcessGroup, Reduce, Shard, ShardSpec};
+use noetic::nn::dist::{check_in_sync, data_parallel_grads, data_parallel_step, state_hash, Checkpoint, CheckpointOptimizer, DeviceKind, DistEnv, DistMode, FastOptions, GroupOptions, ProcessGroup, Reduce, Shard, ShardSpec};
 use noetic::nn::{clip_grad_norm_per_seed, masked_cross_entropy, Adam, AdamConfig, DecayOrder, Decoder, DecoderConfig, ForwardOptions, Optimizer, ParamGroups, Sgd, SgdConfig, VarMap};
 use noetic::tensor::{pin_reference, set_default_device, CpuMode, Device, IntTensor, Tensor};
 use noetic::rng::derive;
@@ -69,8 +76,8 @@ fn batch(items: &[usize]) -> (IntTensor, IntTensor, Tensor) {
     (IntTensor::from_data(t, shape), IntTensor::from_data(y, shape), Tensor::from_data(m, shape))
 }
 
-fn config() -> DecoderConfig {
-    let mut c = DecoderConfig::new(16, 32, 4, 8, 2, 64);
+fn config(width: usize, blocks: usize, mlp: usize) -> DecoderConfig {
+    let mut c = DecoderConfig::new(16, width, 4, 8, blocks, mlp);
     c.dropout = 0.1;
     c.dropout_root = 3;
     c
@@ -134,10 +141,17 @@ struct Args {
     cpu_ranks: Vec<usize>,
     out: Option<PathBuf>,
     job_key: String,
+    fast: bool,
+    bucket_kb: usize,
+    overlap: bool,
+    losses: bool,
+    width: usize,
+    blocks: usize,
+    mlp: usize,
 }
 
 fn args() -> Result<Args, String> {
-    let mut a = Args { device: "cpu".into(), ranks_per_device: 1, micro: 2, steps: 12, opt: "adamw".into(), clip: None, absent: false, idle: None, ckpt_every: 0, ckpt_dir: None, resume: false, node_copies: false, pause: None, cpu_ranks: vec![], out: None, job_key: "ddp gate".into() };
+    let mut a = Args { device: "cpu".into(), ranks_per_device: 1, micro: 2, steps: 12, opt: "adamw".into(), clip: None, absent: false, idle: None, ckpt_every: 0, ckpt_dir: None, resume: false, node_copies: false, pause: None, cpu_ranks: vec![], out: None, job_key: "ddp gate".into(), fast: false, bucket_kb: 25 << 10, overlap: true, losses: false, width: 32, blocks: 2, mlp: 64 };
     let mut it = std::env::args().skip(1);
     let num = |v: Option<String>, k: &str| -> Result<u64, String> { v.ok_or(format!("{k} needs a value"))?.parse().map_err(|_| format!("{k}: not a number")) };
     while let Some(k) = it.next() {
@@ -162,6 +176,13 @@ fn args() -> Result<Args, String> {
             "--cpu-ranks" => a.cpu_ranks = it.next().ok_or("--cpu-ranks needs a list")?.split(',').map(|r| r.parse().map_err(|_| "--cpu-ranks: a rank")).collect::<Result<_, _>>()?,
             "--out" => a.out = Some(it.next().ok_or("--out needs a value")?.into()),
             "--job-key" => a.job_key = it.next().ok_or("--job-key needs a value")?,
+            "--fast" => a.fast = true,
+            "--bucket-kb" => a.bucket_kb = num(it.next(), &k)? as usize,
+            "--no-overlap" => a.overlap = false,
+            "--losses" => a.losses = true,
+            "--width" => a.width = num(it.next(), &k)? as usize,
+            "--blocks" => a.blocks = num(it.next(), &k)? as usize,
+            "--mlp" => a.mlp = num(it.next(), &k)? as usize,
             other => return Err(format!("unknown option {other:?} (see the file's header)")),
         }
     }
@@ -170,6 +191,9 @@ fn args() -> Result<Args, String> {
     }
     if a.idle.is_some() && a.opt == "sgd" {
         return Err("--idle trains under AdamW (--opt adamw)".into());
+    }
+    if !a.fast && (a.bucket_kb != 25 << 10 || !a.overlap) {
+        return Err("--bucket-kb and --no-overlap belong to the fast mode (--fast)".into());
     }
     Ok(a)
 }
@@ -197,11 +221,17 @@ fn main() -> noetic::Result<()> {
     if device == Device::Cpu(CpuMode::Reference) {
         pin_reference();
     }
-    let mut group = ProcessGroup::from_env(GroupOptions::new(format!("{} micro={} absent={} idle={:?} opt={} clip={:?}", a.job_key, a.micro, a.absent, a.idle, a.opt, a.clip)).with_device(device))?;
+    // The gate's job key, unchanged for the gate's model; a larger model names its size.
+    let size = if (a.width, a.blocks, a.mlp) == (32, 2, 64) { String::new() } else { format!(" width={} blocks={} mlp={}", a.width, a.blocks, a.mlp) };
+    let mut opts = GroupOptions::new(format!("{} micro={} absent={} idle={:?} opt={} clip={:?}{size}", a.job_key, a.micro, a.absent, a.idle, a.opt, a.clip)).with_device(device);
+    if a.fast {
+        opts = opts.with_mode(DistMode::Fast(FastOptions::new().with_bucket_bytes(a.bucket_kb << 10).with_overlap(a.overlap)));
+    }
+    let mut group = ProcessGroup::from_env(opts)?;
     let (rank, world) = (group.rank(), group.world_size());
     // The vars are made on the CPU reference backend (the same initial bits on every device), then
     // moved to the rank's device, where the optimizer's state is made.
-    let cfg = config();
+    let cfg = config(a.width, a.blocks, a.mlp);
     let (_, mut init) = Decoder::init(cfg.clone(), SEEDS, 5)?;
     if a.absent {
         init.insert("branch.w", Tensor::from_data((0..SEEDS * 4).map(|i| 0.1 * i as f32 - 0.3).collect(), [SEEDS, 4]))?;
@@ -257,6 +287,7 @@ fn main() -> noetic::Result<()> {
         None => None,
     };
     let mut clipped = 0;
+    let started = std::time::Instant::now();
     for step in start..a.steps {
         if a.pause == Some((rank, step)) {
             println!("rank {rank}: paused before step {step}");
@@ -269,7 +300,16 @@ fn main() -> noetic::Result<()> {
         }
         let k = shard.micro_steps_per_rank();
         // Dropout masks from the global micro-step, never the rank's.
-        let f = |lifted: &VarMap, i: usize| loss(&cfg, lifted, &shard.batch(step, i), step, shard.global_micro(i) as u64, a.micro, a.absent);
+        // With --losses, each micro-step's loss is read (a host copy of the scalar; the
+        // gradients do not depend on it).
+        let mut seen: Vec<f64> = vec![];
+        let f = |lifted: &VarMap, i: usize| {
+            let l = loss(&cfg, lifted, &shard.batch(step, i), step, shard.global_micro(i) as u64, a.micro, a.absent);
+            if a.losses {
+                seen.push(l.to_vec_f64()[0]);
+            }
+            l
+        };
         match a.clip {
             None => {
                 data_parallel_step(&mut group, &mut vars, opt.opt(), k, Reduce::Mean, 1.0, f)?;
@@ -281,6 +321,15 @@ fn main() -> noetic::Result<()> {
                 opt.opt().step(&mut vars, grads, 1.0);
             }
         }
+        if a.losses {
+            // The global mean over the step's micro-steps, added in rank order on every rank.
+            let mine: Vec<u8> = seen.iter().flat_map(|x| x.to_le_bytes()).collect();
+            let all = group.all_gather(&mine)?;
+            let sum: f64 = all.iter().flat_map(|b| b.chunks_exact(8).map(|c| f64::from_le_bytes(c.try_into().expect("8 bytes")))).sum();
+            if rank == 0 {
+                println!("loss {} {:.9e}", step + 1, sum / a.micro as f64);
+            }
+        }
         let h = check_in_sync(&mut group, &vars)?;
         println!("step {} {h}", step + 1);
         if let Some(l) = &mut log {
@@ -290,7 +339,9 @@ fn main() -> noetic::Result<()> {
             Checkpoint::save_with(&mut group, ckpt.as_ref().expect("checked above"), step + 1, step + 1, &vars, opt.ckpt(), a.node_copies)?;
         }
     }
+    let wall = started.elapsed().as_secs_f64();
     if rank == 0 {
+        println!("wall {wall:.3} seconds for {} steps", a.steps - start);
         let fin = state_hash(&vars)?;
         println!("final weights sha256 {fin}");
         if a.clip.is_some() {

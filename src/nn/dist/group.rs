@@ -16,9 +16,15 @@
 //!   last rank sends the total to every other rank. The sum is therefore the fold over the global
 //!   micro-steps in rank order, whatever the timing. Large sums go in chunks so the ranks work
 //!   at once; the chunk size changes the pipelining, never the order of the additions.
+//!
+//! **Modes.** `GroupOptions::mode` is `DistMode::Deterministic` by default. A group in
+//! `DistMode::Fast` trains through the fast mode's ring collectives (see `fast`), carries the fast
+//! mode in its key and its record, and never forms a job with deterministic ranks: the mode
+//! travels in the hello, and rank 0 refuses a mixed-mode job before step 0.
 
 use super::auth::{self, JobSecret};
 use super::env::DistEnv;
+use super::fast::DistMode;
 use super::reduce::{fold, fold_var, GradSum, Part};
 use super::wire::{self, Dec, Enc, Op};
 use crate::error::{NnError, Result};
@@ -57,6 +63,10 @@ pub struct GroupOptions {
     /// The engine and wire-protocol versions this rank says at the rendezvous (`wire_version`);
     /// another value only in tests, to stand for another engine.
     pub(crate) wire: String,
+    /// Deterministic (the default) or fast (`DistMode::Fast`: the ring order, buckets, overlap;
+    /// its own key, never pooled or compared byte for byte with the deterministic mode). Every
+    /// rank of a job must ask for the same mode.
+    pub mode: DistMode,
 }
 
 /// The wire protocol's version: 2 since 0.5.0 (the reduce-scatter's message); 0.3.0 and 0.4.0
@@ -76,6 +86,23 @@ fn split_wire(s: &str) -> (&str, Option<&str>) {
     match s.rfind(" engine=") {
         Some(i) => (&s[..i], Some(&s[i + 1..])),
         None => (s, None),
+    }
+}
+
+/// The platform key of a hello's platform field (versions removed) split from the fast mode's
+/// part (`mode=fast…`; None: the deterministic mode, whose hello is 0.5.0's).
+fn split_mode(s: &str) -> (&str, Option<&str>) {
+    match s.rfind(" mode=") {
+        Some(i) => (&s[..i], Some(&s[i + 1..])),
+        None => (s, None),
+    }
+}
+
+/// How a hello's mode part reads in a refusal.
+fn mode_name(m: Option<&str>) -> String {
+    match m {
+        None => "the deterministic mode".into(),
+        Some(m) => format!("the fast mode ({m})"),
     }
 }
 
@@ -120,11 +147,17 @@ impl GroupOptions {
         self.secret = secret;
         self
     }
+
+    /// The mode: `DistMode::Deterministic` (the default) or `DistMode::Fast`.
+    pub fn with_mode(mut self, mode: DistMode) -> GroupOptions {
+        self.mode = mode;
+        self
+    }
 }
 
 impl Default for GroupOptions {
     fn default() -> Self {
-        GroupOptions { job_key: String::new(), timeout: Duration::from_secs(600), connect_timeout: Duration::from_secs(120), chunk_elems: 1 << 20, platform: super::env::platform_key(), device: Device::Cpu(CpuMode::Reference), secret: None, wire: wire_version() }
+        GroupOptions { job_key: String::new(), timeout: Duration::from_secs(600), connect_timeout: Duration::from_secs(120), chunk_elems: 1 << 20, platform: super::env::platform_key(), device: Device::Cpu(CpuMode::Reference), secret: None, wire: wire_version(), mode: DistMode::Deterministic }
     }
 }
 
@@ -285,6 +318,10 @@ impl ProcessGroup {
     /// The platform key of a rank with these options: `opts.platform`, and the device's part
     /// for a device other than the CPU reference backend (`device_key`).
     fn rank_platform(opts: &GroupOptions) -> Result<String> {
+        // The fast CPU backend is a device of the fast mode only (`device_key` refuses it).
+        if opts.mode.is_fast() && opts.device == Device::Cpu(CpuMode::Fast) {
+            return Ok(format!("{} device=cpu-fast", opts.platform));
+        }
         Ok(match super::env::device_key(opts.device)? {
             None => opts.platform.clone(),
             Some(d) => format!("{} {d}", opts.platform),
@@ -310,8 +347,14 @@ impl ProcessGroup {
             return Err(NnError::Dist(format!("rank {rank} is not in 0..{world}")));
         }
         let platform = ProcessGroup::rank_platform(&opts)?;
-        // The hello's platform field: the platform key, then the engine's versions.
-        let said = format!("{platform} {}", opts.wire);
+        opts.mode.check()?;
+        // The hello's platform field: the platform key, the fast mode's part (none in the
+        // deterministic mode, whose hello is unchanged), then the engine's versions.
+        let my_mode = opts.mode.hello();
+        let said = match &my_mode {
+            None => format!("{platform} {}", opts.wire),
+            Some(m) => format!("{platform} {m} {}", opts.wire),
+        };
         if world == 1 {
             return Ok(ProcessGroup { env: env.clone(), opts, platform, peers: vec![None], seq: 0, checks: WeightChecks::default() });
         }
@@ -353,8 +396,10 @@ impl ProcessGroup {
                 } else if split_wire(&their_platform).1 != Some(opts.wire.as_str()) {
                     let theirs = split_wire(&their_platform).1.unwrap_or("no version (an engine of 0.4.0 or earlier)");
                     Some(format!("rank {r} runs {theirs}, rank 0 runs {} (a mixed-version job)", opts.wire))
-                } else if split_wire(&their_platform).0 != platform {
-                    Some(format!("rank {r} runs on platform {:?}, rank 0 on {platform:?} (a mixed job)", split_wire(&their_platform).0))
+                } else if split_mode(split_wire(&their_platform).0).1 != my_mode.as_deref() {
+                    Some(format!("rank {r} asks for {}, rank 0 for {} (a mixed-mode job)", mode_name(split_mode(split_wire(&their_platform).0).1), mode_name(my_mode.as_deref())))
+                } else if split_mode(split_wire(&their_platform).0).0 != platform {
+                    Some(format!("rank {r} runs on platform {:?}, rank 0 on {platform:?} (a mixed job)", split_mode(split_wire(&their_platform).0).0))
                 } else if r == 0 || r >= world || joined[r].is_some() {
                     Some(format!("a second rank {r} (or one outside 1..{world})"))
                 } else {
@@ -513,6 +558,25 @@ impl ProcessGroup {
         self.opts.device
     }
 
+    /// The group's mode (`GroupOptions::mode`).
+    pub fn mode(&self) -> &DistMode {
+        &self.opts.mode
+    }
+
+    /// Whether the group trains in the fast mode.
+    pub fn is_fast(&self) -> bool {
+        self.opts.mode.is_fast()
+    }
+
+    /// Ok in the deterministic mode; in the fast mode, the refusal of `what`, which needs the
+    /// deterministic mode (a byte-for-byte comparison, a pooled result).
+    pub fn require_deterministic(&self, what: &str) -> Result<()> {
+        if self.is_fast() {
+            return Err(NnError::Dist(format!("{what} needs the deterministic mode; this group trains in the fast mode ({}), which is not reproducible bit for bit (refused)", self.key())));
+        }
+        Ok(())
+    }
+
     /// The platform key the ranks share (`GroupOptions::platform` and the device's part).
     pub fn platform(&self) -> &str {
         &self.platform
@@ -528,24 +592,33 @@ impl ProcessGroup {
     /// The world size is not part of it: for a fixed number of global micro-steps the flat rank
     /// order gives the same bits at every world size, so runs at different world sizes under one
     /// key may be pooled once shown identical on that platform (see `record`).
+    ///
+    /// In the fast mode the key is `mode=fast order=ring world=<W> bucket=<bytes> overlap=on|off
+    /// backend=tcp platform=…`: the bits depend on the world size and the buckets, so both are in
+    /// it, and it never equals a deterministic key.
     pub fn key(&self) -> String {
-        format!("mode=deterministic order=flat-rank backend=tcp platform={}", self.platform)
+        match &self.opts.mode {
+            DistMode::Fast(f) => format!("mode=fast order=ring world={} {} backend=tcp platform={}", self.world_size(), f.key_part(), self.platform),
+            DistMode::Deterministic => format!("mode=deterministic order=flat-rank backend=tcp platform={}", self.platform),
+        }
     }
 
     /// What a run records about its distribution: the key (with the platform key and its maths
     /// library fingerprint), the world size, whether the handshake was authenticated (never the
     /// secret), and the per-step weight checks so far (`check_in_sync`: how many passed, whether
-    /// one failed, the last weights' sha256).
+    /// one failed, the last weights' sha256). A fast-mode record ends with "(fast mode, not
+    /// reproducible bit for bit)".
     pub fn record(&self) -> String {
         let c = &self.checks;
         format!(
-            "{} world={} auth={} weight_checks={} {} last_weights={}",
+            "{} world={} auth={} weight_checks={} {} last_weights={}{}",
             self.key(),
             self.world_size(),
             if self.opts.secret.is_some() { "hmac-sha256" } else { "none" },
             c.passed,
             if c.failed { "failed" } else { "ok" },
-            c.last.as_deref().unwrap_or("none")
+            c.last.as_deref().unwrap_or("none"),
+            if self.is_fast() { " (fast mode, not reproducible bit for bit)" } else { "" }
         )
     }
 
@@ -558,11 +631,11 @@ impl ProcessGroup {
         }
     }
 
-    fn peer(&mut self, q: usize) -> &mut TcpStream {
+    pub(crate) fn peer(&mut self, q: usize) -> &mut TcpStream {
         self.peers[q].as_mut().expect("a peer, not this rank")
     }
 
-    fn next_seq(&mut self) -> u64 {
+    pub(crate) fn next_seq(&mut self) -> u64 {
         self.seq += 1;
         self.seq
     }
