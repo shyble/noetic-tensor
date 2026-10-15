@@ -1,0 +1,40 @@
+# examples/ddp_gate.rs references, win: ranks sharing the device (CUDA: the one GPU)
+# rustc 1.94.1; Windows 10.0.26300.0 x86_64; 2026-10-15T02:00:06.1179333+03:00
+cuda gate M 2 reference (1 process, 2 accumulation micro-steps): final weights sha256 3263b99095eded48b1d0cc9c69d2492b56d9dfe38573ed35f797a6132339ff49
+cuda gate M 2 W 2 (2 ranks sharing the device): final weights sha256 3263b99095eded48b1d0cc9c69d2492b56d9dfe38573ed35f797a6132339ff49; every per-step hash and the final weights equal the reference: yes
+cuda gate M 4 reference (1 process, 4 accumulation micro-steps): final weights sha256 4021208e74c5970b4ba0399cda524de9c497856635ab4a673066ebee72965d04
+cuda gate M 4 W 2 (2 ranks sharing the device): final weights sha256 4021208e74c5970b4ba0399cda524de9c497856635ab4a673066ebee72965d04; every per-step hash and the final weights equal the reference: yes
+cuda gate M 4 W 4 (4 ranks sharing the device): final weights sha256 4021208e74c5970b4ba0399cda524de9c497856635ab4a673066ebee72965d04; every per-step hash and the final weights equal the reference: yes
+cuda absent M 2 reference (1 process, 2 accumulation micro-steps): final weights sha256 7e1eb912d531b3b7288387d3cc345af8152c3a26bc53db3494e719deb32b21ad
+cuda absent M 2 W 2 (2 ranks sharing the device): final weights sha256 7e1eb912d531b3b7288387d3cc345af8152c3a26bc53db3494e719deb32b21ad; every per-step hash and the final weights equal the reference: yes
+cuda absent M 4 reference (1 process, 4 accumulation micro-steps): final weights sha256 849193c50a05813d679e7525acbe6a442fda046a09f3d901ba0f3f69d3e5fb1d
+cuda absent M 4 W 2 (2 ranks sharing the device): final weights sha256 849193c50a05813d679e7525acbe6a442fda046a09f3d901ba0f3f69d3e5fb1d; every per-step hash and the final weights equal the reference: yes
+cuda absent M 4 W 4 (4 ranks sharing the device): final weights sha256 849193c50a05813d679e7525acbe6a442fda046a09f3d901ba0f3f69d3e5fb1d; every per-step hash and the final weights equal the reference: yes
+cuda idle-after M 2 reference (1 process, 2 accumulation micro-steps): final weights sha256 9a1a2a7a53e73db7edec9f80cc80462cab0032a3bca544dd4551726c1890b3d5
+cuda idle-after M 2 W 2 (2 ranks sharing the device): final weights sha256 9a1a2a7a53e73db7edec9f80cc80462cab0032a3bca544dd4551726c1890b3d5; every per-step hash and the final weights equal the reference: yes
+cuda idle-after M 4 reference (1 process, 4 accumulation micro-steps): final weights sha256 c5ff14a460d67746933ce01506e0ac4215dc8b8c0858285a8a649d158f22b69b
+cuda idle-after M 4 W 2 (2 ranks sharing the device): final weights sha256 c5ff14a460d67746933ce01506e0ac4215dc8b8c0858285a8a649d158f22b69b; every per-step hash and the final weights equal the reference: yes
+cuda idle-after M 4 W 4 (4 ranks sharing the device): final weights sha256 c5ff14a460d67746933ce01506e0ac4215dc8b8c0858285a8a649d158f22b69b; every per-step hash and the final weights equal the reference: yes
+cuda idle-torch M 2 reference (1 process, 2 accumulation micro-steps): final weights sha256 2a0ef10e35a0f1818b543b06c2563abf6b1c0cc57ea7c0b2fe2d92d0d3516b48
+cuda idle-torch M 2 W 2 (2 ranks sharing the device): final weights sha256 2a0ef10e35a0f1818b543b06c2563abf6b1c0cc57ea7c0b2fe2d92d0d3516b48; every per-step hash and the final weights equal the reference: yes
+cuda idle-torch M 4 reference (1 process, 4 accumulation micro-steps): final weights sha256 0ede0117a27e699212d2ab735a8ba66129924451cd3fcbf5d5d0edf3ac1eb2c7
+cuda idle-torch M 4 W 2 (2 ranks sharing the device): final weights sha256 0ede0117a27e699212d2ab735a8ba66129924451cd3fcbf5d5d0edf3ac1eb2c7; every per-step hash and the final weights equal the reference: yes
+cuda idle-torch M 4 W 4 (4 ranks sharing the device): final weights sha256 0ede0117a27e699212d2ab735a8ba66129924451cd3fcbf5d5d0edf3ac1eb2c7; every per-step hash and the final weights equal the reference: yes
+cuda clip M 2 reference (1 process, 2 accumulation micro-steps): final weights sha256 d481ddb36d6a9c3f1a169e67d6eda1d1b6fa6a93edd3944a4d1edf30f30de873
+cuda clip M 2 W 2 (2 ranks sharing the device): final weights sha256 d481ddb36d6a9c3f1a169e67d6eda1d1b6fa6a93edd3944a4d1edf30f30de873; every per-step hash and the final weights equal the reference: yes
+cuda clip M 4 reference (1 process, 4 accumulation micro-steps): final weights sha256 561ebc59ea9cce995956425c60e59b15d3a1049428987ffb115ab00589ff93e3
+cuda clip M 4 W 2 (2 ranks sharing the device): final weights sha256 561ebc59ea9cce995956425c60e59b15d3a1049428987ffb115ab00589ff93e3; every per-step hash and the final weights equal the reference: yes
+cuda clip M 4 W 4 (4 ranks sharing the device): final weights sha256 561ebc59ea9cce995956425c60e59b15d3a1049428987ffb115ab00589ff93e3; every per-step hash and the final weights equal the reference: yes
+cuda sgd M 2 reference (1 process, 2 accumulation micro-steps): final weights sha256 7650ce860e8db697d96e771ece5d20fca65c534d33353d6cc31fcb1ebf18d39c
+cuda sgd M 2 W 2 (2 ranks sharing the device): final weights sha256 7650ce860e8db697d96e771ece5d20fca65c534d33353d6cc31fcb1ebf18d39c; every per-step hash and the final weights equal the reference: yes
+cuda sgd M 4 reference (1 process, 4 accumulation micro-steps): final weights sha256 d3de76efd88cc96efa82302de4f371ca789c0e6116c6960e2ab05a158d562c16
+cuda sgd M 4 W 2 (2 ranks sharing the device): final weights sha256 d3de76efd88cc96efa82302de4f371ca789c0e6116c6960e2ab05a158d562c16; every per-step hash and the final weights equal the reference: yes
+cuda sgd M 4 W 4 (4 ranks sharing the device): final weights sha256 d3de76efd88cc96efa82302de4f371ca789c0e6116c6960e2ab05a158d562c16; every per-step hash and the final weights equal the reference: yes
+cpu gate M 2 reference (1 process, 2 accumulation micro-steps): final weights sha256 3b94e85f76b93c1c250415836e41b3afaf15c70294d4ac01c17550f2becae08b
+cpu gate M 2 W 2 (2 ranks sharing the device): final weights sha256 3b94e85f76b93c1c250415836e41b3afaf15c70294d4ac01c17550f2becae08b; every per-step hash and the final weights equal the reference: yes
+cpu gate M 4 reference (1 process, 4 accumulation micro-steps): final weights sha256 968508fe80c79c35340ee7227044ca2242038d6b7884858c979950c2680ead83
+cpu gate M 4 W 2 (2 ranks sharing the device): final weights sha256 968508fe80c79c35340ee7227044ca2242038d6b7884858c979950c2680ead83; every per-step hash and the final weights equal the reference: yes
+cpu gate M 4 W 4 (4 ranks sharing the device): final weights sha256 968508fe80c79c35340ee7227044ca2242038d6b7884858c979950c2680ead83; every per-step hash and the final weights equal the reference: yes
+cuda resume W 2 M 2 (checkpoint of step 6, relaunched to step 12): final weights sha256 3263b99095eded48b1d0cc9c69d2492b56d9dfe38573ed35f797a6132339ff49; equals the reference and every per-step hash: yes
+run record: record mode=deterministic order=flat-rank backend=tcp platform=windows-x86_64-avx+avx2+fma-rustc_1.94.1-matrixmultiply-0.3.11 libm=<sha256> device=cuda-NVIDIA_GeForce_RTX_4060_Laptop_GPU-sm89-driver13040-nvrtc12.6-nofastmath-fmadoff-kernels-<hex>-driver-release-617.14 world=2 auth=hmac-sha256 weight_checks=13 ok last_weights=3263b99095eded48b1d0cc9c69d2492b56d9dfe38573ed35f797a6132339ff49
+# ended 2026-10-15T02:00:46.9068432+03:00, all identical

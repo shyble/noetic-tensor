@@ -4,8 +4,8 @@
 # mode, one test at a time. The log goes to doc/gates/e2/logs/<label>.log.
 #
 #   doc/gates/e2/run_gates.sh mac-cpu              # the CPU reference backend
-#   doc/gates/e2/run_gates.sh mac-metal metal      # Apple GPU ranks (the gpu_ tests)
-#   doc/gates/e2/run_gates.sh win-cuda cuda        # CUDA ranks (the gpu_ tests)
+#   doc/gates/e2/run_gates.sh mac-metal metal      # the same, and the GPU gates (gpu_ tests) on Metal
+#   doc/gates/e2/run_gates.sh win-cuda cuda        # the same, and the GPU gates on CUDA
 #
 # DIST_TEST_MAX_PROCS=N (a development switch) skips the runs needing more than N processes at
 # once; each skip is printed in the log. CARGO_BUILD_JOBS limits the build.
@@ -22,7 +22,7 @@ log="$here/logs/$label.log"
 cd "$here/../../.."
 root=$(pwd)
 sanitize() {
-  perl -pe 'BEGIN { $r = shift } s/\Q$r\E/./g; s{(/U[s]ers/|/h[o]me/|[A-Za-z]:\\U[s]ers\\)\S*}{<path>}g; s/\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*[0-9])[0-9a-f]{7,40}\b/<hex>/g' "$root" |
+  perl -pe 'BEGIN { $r = shift } s/\Q$r\E/./g; s{(/U[s]ers/|/h[o]me/|[A-Za-z]:\\U[s]ers\\)\S*}{<path>}g; s/metal-Apple_[A-Za-z0-9_]+-mathmode/metal-<the GPU\x27s name>-mathmode/g; s/\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*[0-9])[0-9a-f]{7,40}\b/<hex>/g' "$root" |
     grep -vE '^ *(Compiling|Finished|Running|Blocking|Fresh|Doc-tests)' || true
 }
 {
