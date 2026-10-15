@@ -29,7 +29,7 @@ use super::reduce::{fold, fold_var, GradSum, Part};
 use super::wire::{self, Dec, Enc, Op};
 use crate::error::{NnError, Result};
 use crate::nn::VarMap;
-use crate::tensor::{CpuMode, Device};
+use crate::tensor::{CpuMode, Device, MatmulPrecision};
 use std::net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
 use std::time::{Duration, Instant};
 
@@ -173,6 +173,9 @@ pub struct ProcessGroup {
     seq: u64,
     /// The weight checks (`check_in_sync`): how many passed, the last hash, whether one failed.
     pub(crate) checks: WeightChecks,
+    /// The matmul precision of the thread that made the group, on a GPU (its key carries it;
+    /// `tensor::set_matmul_precision`); F32 on the CPU.
+    precision: MatmulPrecision,
 }
 
 /// The per-step weight checks of a run, for its record.
@@ -312,7 +315,7 @@ impl ProcessGroup {
     /// The group of one process: no network; every collective is the identity.
     pub fn single() -> ProcessGroup {
         let opts = GroupOptions::default();
-        ProcessGroup { env: DistEnv::single(), platform: opts.platform.clone(), opts, peers: vec![None], seq: 0, checks: WeightChecks::default() }
+        ProcessGroup { env: DistEnv::single(), platform: opts.platform.clone(), opts, peers: vec![None], seq: 0, checks: WeightChecks::default(), precision: MatmulPrecision::F32 }
     }
 
     /// The platform key of a rank with these options: `opts.platform`, and the device's part
@@ -328,6 +331,12 @@ impl ProcessGroup {
         })
     }
 
+    /// The calling thread's matmul precision for a group on `opts.device` (F32 on the CPU, whose
+    /// products are always f32).
+    fn thread_precision(opts: &GroupOptions) -> MatmulPrecision {
+        if matches!(opts.device, Device::Cpu(_)) { MatmulPrecision::F32 } else { crate::tensor::matmul_precision() }
+    }
+
     /// The group the environment describes (`DistEnv::from_env`), or the single-process group
     /// when distribution is off.
     pub fn from_env(mut opts: GroupOptions) -> Result<ProcessGroup> {
@@ -335,7 +344,7 @@ impl ProcessGroup {
             opts.secret = JobSecret::from_env()?;
         }
         match DistEnv::from_env()? {
-            None => Ok(ProcessGroup { platform: ProcessGroup::rank_platform(&opts)?, opts, ..ProcessGroup::single() }),
+            None => Ok(ProcessGroup { platform: ProcessGroup::rank_platform(&opts)?, precision: ProcessGroup::thread_precision(&opts), opts, ..ProcessGroup::single() }),
             Some(env) => ProcessGroup::init(&env, opts),
         }
     }
@@ -356,7 +365,7 @@ impl ProcessGroup {
             Some(m) => format!("{platform} {m} {}", opts.wire),
         };
         if world == 1 {
-            return Ok(ProcessGroup { env: env.clone(), opts, platform, peers: vec![None], seq: 0, checks: WeightChecks::default() });
+            return Ok(ProcessGroup { env: env.clone(), precision: ProcessGroup::thread_precision(&opts), opts, platform, peers: vec![None], seq: 0, checks: WeightChecks::default() });
         }
         let deadline = Instant::now() + opts.connect_timeout;
         let master = resolve(&env.master_addr, env.master_port)?;
@@ -532,7 +541,7 @@ impl ProcessGroup {
         for s in peers.iter().flatten() {
             tune(s, opts.timeout)?;
         }
-        let mut g = ProcessGroup { env: env.clone(), opts, platform, peers, seq: 0, checks: WeightChecks::default() };
+        let mut g = ProcessGroup { env: env.clone(), precision: ProcessGroup::thread_precision(&opts), opts, platform, peers, seq: 0, checks: WeightChecks::default() };
         g.barrier()?;
         Ok(g)
     }
@@ -556,6 +565,26 @@ impl ProcessGroup {
     /// The device this rank trains on (`GroupOptions::device`).
     pub fn device(&self) -> Device {
         self.opts.device
+    }
+
+    /// The matmul precision the group was made at (its key carries it on a GPU).
+    pub fn matmul_precision(&self) -> MatmulPrecision {
+        self.precision
+    }
+
+    /// Ok when the calling thread multiplies at the precision the group was made at (and so is
+    /// keyed by); otherwise the refusal: a step at another precision than its key says.
+    pub(crate) fn check_precision(&self) -> Result<()> {
+        let now = ProcessGroup::thread_precision(&self.opts);
+        if now != self.precision {
+            return Err(NnError::Dist(format!(
+                "rank {}: this thread multiplies at matmul precision {}, the group was made (and is keyed) at {} (set the precision before the group is made)",
+                self.rank(),
+                now.name(),
+                self.precision.name()
+            )));
+        }
+        Ok(())
     }
 
     /// The group's mode (`GroupOptions::mode`).

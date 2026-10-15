@@ -1910,3 +1910,6 @@ mod zero_tests;
 
 #[path = "fast_tests.rs"]
 mod fast_tests;
+
+#[path = "mixed_tests.rs"]
+mod mixed_tests;

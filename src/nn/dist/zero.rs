@@ -691,6 +691,7 @@ impl<O> ShardedDataParallel<O> {
     /// group's key says so.
     pub fn grads(&mut self, group: &mut ProcessGroup, micro_steps_per_rank: usize, how: Reduce, mut micro: impl FnMut(&VarMap, usize) -> Tensor) -> Result<ShardGrads> {
         self.check_group(group)?;
+        group.check_precision()?;
         if group.is_fast() {
             return self.fast_grads(group, micro_steps_per_rank, how, micro);
         }
