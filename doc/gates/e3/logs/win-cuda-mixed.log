@@ -1,0 +1,22 @@
+# E3 gates 2 and 3 (mixed precision), win-cuda: NVIDIA GeForce RTX 4060 Laptop GPU, 617.14; 12th Gen Intel(R) Core(TM) i5-12450H; rustc 1.94.1; Windows 10.0.26300.0 x86_64; 2026-10-15T13:36:37.3832953+03:00
+# every process on 2 logical CPUs at below-normal priority; ranks share the GPU; mixed results are compared with f32 by a tolerance, never byte for byte
+## Gate 2: run to run and restart, per key (12 steps, M 2)
+one (W 1 ): final weights sha256 e7c87fa3ce04369e172c4e0ce66651311286cb22a4899ec105266db8e0efbcc3; run twice, every per-step hash and the final weights the same: yes
+one: 7 steps with checkpoints every 3, a new launch resuming from step 6 to 12: every per-step hash and the final weights the uninterrupted run's: yes
+ddp (W 2 ): final weights sha256 e7c87fa3ce04369e172c4e0ce66651311286cb22a4899ec105266db8e0efbcc3; run twice, every per-step hash and the final weights the same: yes
+ddp: 7 steps with checkpoints every 3, a new launch resuming from step 6 to 12: every per-step hash and the final weights the uninterrupted run's: yes
+zero (W 2 --zero 2:flat): final weights sha256 e7c87fa3ce04369e172c4e0ce66651311286cb22a4899ec105266db8e0efbcc3; run twice, every per-step hash and the final weights the same: yes
+zero: 7 steps with checkpoints every 3, a new launch resuming from step 6 to 12: every per-step hash and the final weights the uninterrupted run's: yes
+W 2 data-parallel against one process (the deterministic mode's identity within the mixed key): yes
+W 2 sharded (stage 2, flat) against W 2 data-parallel: yes
+key and record (one process): mode=deterministic order=flat-rank backend=tcp platform=windows-x86_64-avx+avx2+fma-rustc_1.94.1-matrixmultiply-0.3.11 libm=<sha256> device=cuda-NVIDIA_GeForce_RTX_4060_Laptop_GPU-sm89-driver13040-nvrtc12.6-nofastmath-fmadoff-kernels-<hex>-driver-release-617.14-gemm-bf16-mma.m16n8k16-f32acc-tile64x64x32-kernels-<hex> world=1 auth=none weight_checks=13 ok last_weights=e7c87fa3ce04369e172c4e0ce66651311286cb22a4899ec105266db8e0efbcc3 matmul=half loss-scale=2^0
+key and record (sharded): mode=deterministic order=flat-rank backend=tcp platform=windows-x86_64-avx+avx2+fma-rustc_1.94.1-matrixmultiply-0.3.11 libm=<sha256> device=cuda-NVIDIA_GeForce_RTX_4060_Laptop_GPU-sm89-driver13040-nvrtc12.6-nofastmath-fmadoff-kernels-<hex>-driver-release-617.14-gemm-bf16-mma.m16n8k16-f32acc-tile64x64x32-kernels-<hex> world=2 auth=hmac-sha256 weight_checks=13 ok last_weights=e7c87fa3ce04369e172c4e0ce66651311286cb22a4899ec105266db8e0efbcc3 sharding=stage-2-gradients partition=flat matmul=half loss-scale=2^0
+fast mode, W 2, M 4, run twice: the same per-step hashes: yes (an observation; the fast mode makes no such promise); key: mode=fast order=ring world=2 bucket=26214400 overlap=on backend=tcp platform=windows-x86_64-avx+avx2+fma-rustc_1.94.1-matrixmultiply-0.3.11 libm=<sha256> device=cuda-NVIDIA_GeForce_RTX_4060_Laptop_GPU-sm89-driver13040-nvrtc12.6-nofastmath-fmadoff-kernels-<hex>-driver-release-617.14-gemm-bf16-mma.m16n8k16-f32acc-tile64x64x32-kernels-<hex> world=2 auth=hmac-sha256 weight_checks=13 ok last_weights=f6d869c44fa603c0ef8d0bd6fe11f7ec9cb9616a218b11e677acf2f03011db7c (fast mode, not reproducible bit for bit) matmul=half loss-scale=2^0
+f32 resume of the mixed checkpoint: refused (resume refused: another key)
+## Gate 3: the loss against f32 (one process, M 4, 200 steps)
+mixed-long against f32: steps 1-12 largest |difference| 8.036e-003 at step 3 (relative 1.354e-003); steps 1-200 largest |difference| 4.483e-001 at step 194 (relative 1.965e+001); skipped steps 0
+mixed8-long against f32: steps 1-12 largest |difference| 8.036e-003 at step 3 (relative 1.354e-003); steps 1-200 largest |difference| 4.483e-001 at step 194 (relative 1.965e+001); skipped steps 0
+mean loss by window, f32-long: steps 1-12 4.2007, 13-50 0.6709, 51-100 0.1209, 101-150 0.0807, 151-200 0.0834
+mean loss by window, mixed-long: steps 1-12 4.1991, 13-50 0.6712, 51-100 0.1024, 101-150 0.1247, 151-200 0.0891
+mean loss by window, mixed8-long: steps 1-12 4.1991, 13-50 0.6712, 51-100 0.1024, 101-150 0.1247, 151-200 0.0891
+# ended 2026-10-15T13:37:28.8752607+03:00, all checks passed

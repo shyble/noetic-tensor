@@ -1,0 +1,8 @@
+# E3: the mixed-precision tests on CUDA (ranks as threads on the RTX 4060 Laptop GPU); rustc 1.94.1; Windows x86_64; 2 logical CPUs, below-normal priority; 2026-10-15T10:44:29Z (PowerShell's wrapping of the test binary's stderr undone: one line rejoined, its error-record lines dropped)
+test nn::dist::tests::mixed_tests::a_mixed_step_needs_a_group_made_at_half ... ok
+test nn::dist::tests::mixed_tests::gpu::gpu_a_job_mixing_precisions_or_a_step_at_another_precision_is_refused ... ok
+test nn::dist::tests::mixed_tests::gpu::gpu_mixed_overflow_skips_the_step_on_every_rank ... ok
+cuda mixed: W 2 (data-parallel and sharded stage 2) equal one process for 6 steps; final 03b0f12cfa17e89c4d57219e599231a9c60e5265825efe1e2bfec46f9a8f2f50
+test nn::dist::tests::mixed_tests::gpu::gpu_mixed_world_size_2_equals_one_process_within_the_mixed_key ... ok
+test nn::dist::tests::mixed_tests::the_loss_scale_is_a_power_of_two_and_exact ... ok
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 225 filtered out; finished in 5.57s

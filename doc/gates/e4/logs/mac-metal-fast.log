@@ -1,0 +1,42 @@
+# E4 gate 2 (the fast mode), mac-metal: device metal, ranks sharing the device, at most 2 processes at once
+# rustc 1.94.1; Darwin arm64; 2026-10-15T07:23:14Z
+# fast-mode results are compared with a tolerance, never byte for byte; they are not reproducible bit for bit
+## 1. The gate's model, 12 steps
+deterministic M 2, 1 process: final weights sha256 e261aa4cd3b1b6b9eeb4e1ba4f8699eb1f648a1c2032d9028d08a03b9918306f
+deterministic M 2 W 2: final weights sha256 e261aa4cd3b1b6b9eeb4e1ba4f8699eb1f648a1c2032d9028d08a03b9918306f (equal to 1 process, as the deterministic mode promises)
+fast M 2 W 2 buckets 25600 KiB overlap on: final weights sha256 e261aa4cd3b1b6b9eeb4e1ba4f8699eb1f648a1c2032d9028d08a03b9918306f (the same bits as the deterministic run); against the deterministic losses: largest |loss difference| 0.000e+00 at step 12, largest relative 0.000e+00, over 12 steps; every per-step weight check passed on every rank
+fast M 2 W 2 buckets 16 KiB overlap on: final weights sha256 e261aa4cd3b1b6b9eeb4e1ba4f8699eb1f648a1c2032d9028d08a03b9918306f (the same bits as the deterministic run); against the deterministic losses: largest |loss difference| 0.000e+00 at step 12, largest relative 0.000e+00, over 12 steps; every per-step weight check passed on every rank
+fast M 2 W 2 buckets 16 KiB overlap off: final weights sha256 e261aa4cd3b1b6b9eeb4e1ba4f8699eb1f648a1c2032d9028d08a03b9918306f (the same bits as the deterministic run); against the deterministic losses: largest |loss difference| 0.000e+00 at step 12, largest relative 0.000e+00, over 12 steps; every per-step weight check passed on every rank
+deterministic M 4, 1 process: final weights sha256 4d1adffd836bbd93cd25e3522f02c3f856feaf6c02b64ecd9afc0086767fdc21
+deterministic M 4 W 2: final weights sha256 4d1adffd836bbd93cd25e3522f02c3f856feaf6c02b64ecd9afc0086767fdc21 (equal to 1 process, as the deterministic mode promises)
+fast M 4 W 2 buckets 25600 KiB overlap on: final weights sha256 e63c5f1097171dcd27de0b813f47a3c9645eace18849d4d7f5444ea8b6caa755 (other bits than the deterministic run); against the deterministic losses: largest |loss difference| 1.790e-07 at step 11, largest relative 6.031e-08, over 12 steps; every per-step weight check passed on every rank
+fast M 4 W 2 buckets 16 KiB overlap on: final weights sha256 e63c5f1097171dcd27de0b813f47a3c9645eace18849d4d7f5444ea8b6caa755 (other bits than the deterministic run); against the deterministic losses: largest |loss difference| 1.790e-07 at step 11, largest relative 6.031e-08, over 12 steps; every per-step weight check passed on every rank
+fast M 4 W 2 buckets 16 KiB overlap off: final weights sha256 e63c5f1097171dcd27de0b813f47a3c9645eace18849d4d7f5444ea8b6caa755 (other bits than the deterministic run); against the deterministic losses: largest |loss difference| 1.790e-07 at step 11, largest relative 6.031e-08, over 12 steps; every per-step weight check passed on every rank
+fast M 4 W 4: SKIPPED (4 processes at once, at most 2)
+fast-mode record (M 4 W 2, 16 KiB buckets): mode=fast order=ring world=2 bucket=16384 overlap=on backend=tcp platform=macos-aarch64-neon-rustc_1.94.1-matrixmultiply-0.3.11 libm=<sha256> device=metal-<the GPU name>-mathmode-safe-kernels-<hex>-family-apple7-metal4-mac2-arch-applegpu_g13s-macos-Version_27.0.1__Build_26A434_ world=2 auth=hmac-sha256 weight_checks=13 ok last_weights=e63c5f1097171dcd27de0b813f47a3c9645eace18849d4d7f5444ea8b6caa755 (fast mode, not reproducible bit for bit)
+deterministic record (M 4 W 2): mode=deterministic order=flat-rank backend=tcp platform=macos-aarch64-neon-rustc_1.94.1-matrixmultiply-0.3.11 libm=<sha256> device=metal-<the GPU name>-mathmode-safe-kernels-<hex>-family-apple7-metal4-mac2-arch-applegpu_g13s-macos-Version_27.0.1__Build_26A434_ world=2 auth=hmac-sha256 weight_checks=13 ok last_weights=4d1adffd836bbd93cd25e3522f02c3f856feaf6c02b64ecd9afc0086767fdc21
+note: at M 2, W 2 each rank has one micro-step, so the ring adds the two micro-steps' gradients a and b once, and f32 addition commutes: the fast mode can give the deterministic bits there; at M 4 W 2 (micro-steps a, b, c, d) it adds (a + b) + (c + d) where the deterministic mode adds ((a + b) + c) + d
+## 2. The gate's model, 200 steps, M 4
+deterministic, 1 process: final weights sha256 18611f666b747812979722ebeb158af89038311f0b0346179ba2c3911f9798b7; mean loss over steps 1-10 4.478261, over steps 191-200 0.075768
+fast-long (W 2): final weights sha256 d89b16e30835c5827ba0fff6b6d993d270745b49291a6ae8e558ed98b4e58b94; mean loss over steps 191-200 0.082898; against the deterministic losses: largest |loss difference| 6.769e-02 at step 200, largest relative 7.068e-01, over 200 steps; every per-step weight check passed on every rank
+fast-long-b16 (W 2): final weights sha256 d89b16e30835c5827ba0fff6b6d993d270745b49291a6ae8e558ed98b4e58b94; mean loss over steps 191-200 0.082898; against the deterministic losses: largest |loss difference| 6.769e-02 at step 200, largest relative 7.068e-01, over 200 steps; every per-step weight check passed on every rank
+  step   1: deterministic 6.551885 fast 6.551885 difference +0.000e+00
+  step  20: deterministic 0.996618 fast 0.996618 difference -1.043e-07
+  step  40: deterministic 0.199293 fast 0.199293 difference -3.046e-07
+  step  60: deterministic 0.178189 fast 0.178187 difference -1.427e-06
+  step  80: deterministic 0.319676 fast 0.319675 difference -1.298e-06
+  step 100: deterministic 0.197900 fast 0.197893 difference -7.398e-06
+  step 120: deterministic 0.036476 fast 0.036462 difference -1.381e-05
+  step 140: deterministic 0.037165 fast 0.037164 difference -3.506e-07
+  step 160: deterministic 0.117838 fast 0.119708 difference +1.871e-03
+  step 180: deterministic 0.081979 fast 0.091895 difference +9.917e-03
+  step 200: deterministic 0.095774 fast 0.163466 difference +6.769e-02
+## 3. A repeat of one fast run (an observation; the mode makes no such promise)
+fast M 4 W 2 buckets 16 KiB, run again: the same per-step hashes as the first run
+## 4. Refusals before step 0
+mixed (node 0: ddp_gate --fast; node 1: ddp_gate ): refused on both ranks before step 0; rank 0 said: rank 1 asks for the deterministic mode, rank 0 for the fast mode (mode=fast order=ring bucket=26214400 overlap=on) (a mixed-mode job)")
+buckets (node 0: ddp_gate --fast --bucket-kb 16; node 1: ddp_gate --fast): refused on both ranks before step 0; rank 0 said: rank 1 asks for the fast mode (mode=fast order=ring bucket=26214400 overlap=on), rank 0 for the fast mode (mode=fast order=ring bucket=16384 overlap=on) (a mixed-mode job)")
+## 5. A fast checkpoint and its resume
+fast M 4 W 2, 7 steps with checkpoints every 3, resumed from step 6 to 12: the uninterrupted fast run's final weights (an observation)
+deterministic resume of the fast checkpoint: refused (another platform or device: resume refused)
+# ended 2026-10-15T07:24:10Z, all checks passed

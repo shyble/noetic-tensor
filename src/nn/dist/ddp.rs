@@ -67,6 +67,11 @@ pub fn data_parallel_step(
 /// the lifted vars (a fresh `VarMap::lifted` per micro-step). Each micro-step's gradients are
 /// copied to the host as f32 and summed there by `GradSum` in the flat rank order, whatever the
 /// device; the sum is scaled by `how` and goes back to the vars' devices.
+///
+/// In the fast mode (`DistMode::Fast`) each rank sums its own micro-steps first and the ranks'
+/// sums are reduced by the ring in buckets, overlapped with the last micro-step's backward pass:
+/// every rank still gets the same sum, but its bits depend on the world size and the buckets
+/// (not reproducible bit for bit; the group's key says so).
 pub fn data_parallel_grads(
     group: &mut ProcessGroup,
     vars: &VarMap,
@@ -77,6 +82,17 @@ pub fn data_parallel_grads(
     // The run's key names the group's device: the vars must live there.
     if let Some((i, t)) = vars.tensors().iter().enumerate().find(|(_, t)| t.device() != group.device()) {
         return Err(NnError::Dist(format!("var {:?} is on {:?}, the group trains on {:?} (GroupOptions::device)", vars.names()[i], t.device(), group.device())));
+    }
+    // The step multiplies at the precision the group's key names.
+    group.check_precision()?;
+    if group.is_fast() {
+        // The fast mode (not reproducible bit for bit; its own key): see `fast`.
+        let (vals, count) = super::fast::fast_grads(group, vars, micro_steps_per_rank, how, super::fast::Target::AllReduce, micro)?;
+        if count == 0 {
+            return Err(NnError::Dist("a step without micro-steps on any rank".into()));
+        }
+        let grads = vars.tensors().iter().zip(vals).map(|(t, v)| v.map(|v| Tensor::from_data(v, t.shape().to_vec()).to(t.device()))).collect();
+        return Ok((grads, count));
     }
     let mut sum = group.grad_sum(vars);
     for i in 0..micro_steps_per_rank {

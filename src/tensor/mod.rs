@@ -29,6 +29,7 @@ mod float;
 pub(crate) mod gpu;
 pub mod half;
 mod int;
+mod precision;
 mod kernels;
 mod shape;
 
@@ -45,6 +46,7 @@ pub use storage::{CpuStorage, Storage};
 pub use metal::{replay_trace as metal_replay_trace, set_trace as metal_trace, set_per_kernel_timing as metal_per_kernel_timing, take_profile as metal_profile, Profile as MetalProfile};
 pub use gpu::{gpu_key, gpu_platform_key, synchronize, transfer_counts, GpuStorage};
 pub use float::Tensor;
+pub use precision::{half_gemm_key, matmul_precision, set_matmul_precision, MatmulPrecision};
 
 /// GPU memory on `device`: (bytes in use, the limit) — Metal: this process's buffers and the
 /// recommended working set; CUDA: the device's used and total memory. None on a CPU device, or
