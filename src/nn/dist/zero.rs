@@ -1014,7 +1014,7 @@ impl<O> ShardedDataParallel<O> {
                 group.options().job_key
             ))
         } else if meta.group_key != group.key() {
-            Some(format!("the checkpoint at step {} was taken under the key {:?}; this run's key is {:?} (another platform or device: resume refused)", meta.step, meta.group_key, group.key()))
+            Some(format!("the checkpoint at step {} was taken under the key {:?}; this run's key is {:?} (another {}: resume refused)", meta.step, meta.group_key, group.key(), super::group::key_difference(&meta.group_key, &group.key())))
         } else if meta.partition != self.opts.partition.name() || meta.layout != self.layout.key() {
             Some(format!("the checkpoint at step {} holds {} pieces of another layout ({}); this run's are {} ({}) (resume refused)", meta.step, meta.partition, meta.layout, self.opts.partition.name(), self.layout.key()))
         } else if meta.cursors.len() != group.world_size() || meta.ranks.len() != group.world_size() {

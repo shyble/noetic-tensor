@@ -348,12 +348,12 @@ fn a_checkpoint_of_one_mode_is_refused_by_the_other() {
     data_parallel_step(&mut det, &mut vars, &mut adam, 2, Reduce::Mean, 1.0, |l, i| gate_loss(&cfg, l, &[i, i + 1], i as u64)).unwrap();
     Checkpoint::save(&mut det, &dir, 1, 1, &vars, &adam).unwrap();
     let e = Checkpoint::load_latest(&mut fst, &dir).unwrap_err();
-    assert!(e.to_string().contains("resume refused") && e.to_string().contains("mode=fast"), "{e}");
+    assert!(e.to_string().contains("(another mode: resume refused)") && e.to_string().contains("mode=fast"), "{e}");
     let dir2 = scratch("fast-checkpoint-2");
     data_parallel_step(&mut fst, &mut vars, &mut adam, 2, Reduce::Mean, 1.0, |l, i| gate_loss(&cfg, l, &[i, i + 1], i as u64)).unwrap();
     Checkpoint::save(&mut fst, &dir2, 2, 2, &vars, &adam).unwrap();
     let e = Checkpoint::load_latest(&mut det, &dir2).unwrap_err();
-    assert!(e.to_string().contains("resume refused"), "{e}");
+    assert!(e.to_string().contains("(another mode: resume refused)"), "{e}");
     assert!(Checkpoint::load_latest(&mut fst, &dir2).unwrap().is_some());
     std::fs::remove_dir_all(&dir).unwrap();
     std::fs::remove_dir_all(&dir2).unwrap();
@@ -367,4 +367,41 @@ fn the_fast_cpu_backend_is_a_device_of_the_fast_mode_only() {
     assert!(device_key(cpu_fast).is_err());
     let k = on_ranks(1, opts("cpu fast").with_device(cpu_fast).with_mode(fast(1 << 20, true)), |g| g.key()).pop().unwrap().unwrap();
     assert!(k.starts_with("mode=fast ") && k.ends_with(" device=cpu-fast"), "{k}");
+}
+
+#[test]
+fn a_sharded_checkpoint_of_one_mode_is_refused_by_the_other_naming_the_mode() {
+    let _guard = procs();
+    let one = |mode: DistMode| {
+        let env = DistEnv { rank: 0, world_size: 1, rank_in_node: 0, node_size: 1, node_rank: 0, master_addr: "127.0.0.1".into(), master_port: 1 };
+        ProcessGroup::init(&env, opts("sharded ckpt").with_mode(mode)).unwrap()
+    };
+    let cfg = gate_cfg();
+    for (from, to) in [(DistMode::Deterministic, fast(1 << 20, true)), (fast(1 << 20, true), DistMode::Deterministic)] {
+        let dir = scratch("fast-sharded-checkpoint");
+        let (mut a, mut b) = (one(from.clone()), one(to.clone()));
+        let (vars, _) = gate_state(false);
+        let make = |v: &VarMap, g: crate::nn::ParamGroups| Adam::new(AdamConfig { lr: 1e-2, ..AdamConfig::default() }, g, v);
+        let mut sa = ShardedDataParallel::new(&mut a, vars.clone(), crate::nn::ParamGroups::new(&vars), ShardOptions::new(ShardStage::Gradients), make).unwrap();
+        sa.step(&mut a, 2, Reduce::Mean, 1.0, |l, i| gate_loss(&cfg, l, &[i, i + 1], i as u64)).unwrap();
+        sa.save_sharded(&mut a, &dir, 1, 1).unwrap();
+        let sb = ShardedDataParallel::new(&mut b, vars.clone(), crate::nn::ParamGroups::new(&vars), ShardOptions::new(ShardStage::Gradients), make).unwrap();
+        let e = sb.load_sharded_latest(&mut b, &dir).unwrap_err();
+        assert!(e.to_string().contains("(another mode: resume refused)"), "{from:?} to {to:?}: {e}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+}
+
+#[test]
+fn the_key_difference_names_mode_precision_or_platform() {
+    let det = "mode=deterministic order=flat-rank backend=tcp platform=p device=metal-x";
+    let fst = "mode=fast order=ring world=2 bucket=1 overlap=on backend=tcp platform=p device=metal-x";
+    let fst_w4 = "mode=fast order=ring world=4 bucket=1 overlap=on backend=tcp platform=p device=metal-x";
+    let half = "mode=deterministic order=flat-rank backend=tcp platform=p device=metal-x-gemm-f16-simdgroup8x8-f32acc-tile64x64x32-kernels-0";
+    let other = "mode=deterministic order=flat-rank backend=tcp platform=q device=metal-y";
+    assert_eq!(super::group::key_difference(det, fst), "mode");
+    assert_eq!(super::group::key_difference(fst, fst_w4), "mode");
+    assert_eq!(super::group::key_difference(det, half), "matmul precision");
+    assert_eq!(super::group::key_difference(half, det), "matmul precision");
+    assert_eq!(super::group::key_difference(det, other), "platform or device");
 }

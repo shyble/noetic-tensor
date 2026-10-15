@@ -69,15 +69,32 @@ pub struct GroupOptions {
     pub mode: DistMode,
 }
 
-/// The wire protocol's version: 2 since 0.5.0 (the reduce-scatter's message); 0.3.0 and 0.4.0
-/// spoke version 1 and said none.
-pub const WIRE_PROTOCOL: u32 = 2;
+/// The wire protocol's version: 3 since 0.6.0 (the fast mode's ring messages, and the mode in a
+/// fast-mode rank's hello); 2 in 0.5.0 (the reduce-scatter's message); 0.3.0 and 0.4.0 spoke
+/// version 1 and said none.
+pub const WIRE_PROTOCOL: u32 = 3;
 
 /// What a rank says about its engine at the rendezvous: `engine=<crate version> wire=<protocol>`.
 /// It travels after the platform key in the hello, and rank 0 refuses a rank that says anything
 /// else, before step 0; it is not part of the group's key.
 pub fn wire_version() -> String {
     format!("engine={} wire={WIRE_PROTOCOL}", env!("CARGO_PKG_VERSION"))
+}
+
+/// Which part of two group keys differs, as a refusal names it: "mode" (deterministic or fast,
+/// and the fast mode's world size and buckets: everything before ` backend=`), "matmul precision"
+/// (the reduced-precision product's part of the device key, `-gemm-…`, or its absence), or
+/// "platform or device" (the rest).
+pub(crate) fn key_difference(a: &str, b: &str) -> &'static str {
+    let mode = |k: &str| k.split(" backend=").next().unwrap_or("").to_string();
+    let gemm = |k: &str| k.find("-gemm-").map(|i| k[i..].split_whitespace().next().unwrap_or("").to_string());
+    if mode(a) != mode(b) {
+        "mode"
+    } else if gemm(a) != gemm(b) {
+        "matmul precision"
+    } else {
+        "platform or device"
+    }
 }
 
 /// A hello's platform field split into the platform key and the engine's versions (None: a rank

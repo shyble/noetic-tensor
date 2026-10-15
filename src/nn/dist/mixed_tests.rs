@@ -172,4 +172,43 @@ mod gpu {
         crate::tensor::set_default_device(crate::tensor::Device::Cpu(crate::tensor::CpuMode::Reference)).unwrap();
         assert!(e.to_string().contains("the group was made (and is keyed) at f32"), "{e}");
     }
+
+    #[test]
+    fn gpu_a_checkpoint_at_one_precision_is_refused_at_the_other_naming_the_precision() {
+        let _guard = procs();
+        let cfg = gate_cfg();
+        let make_group = |p: MatmulPrecision| {
+            set_matmul_precision(p);
+            let g = ProcessGroup::init(&DistEnv::single(), opts("precision ckpt").with_device(dev())).unwrap();
+            g
+        };
+        crate::tensor::set_default_device(dev()).unwrap();
+        for (from, to) in [(MatmulPrecision::F32, MatmulPrecision::Half), (MatmulPrecision::Half, MatmulPrecision::F32)] {
+            for sharded in [false, true] {
+                let dir = scratch("precision-checkpoint");
+                let mut a = make_group(from);
+                let (mut vars, mut adam) = gate_state_on(false, None, dev());
+                let make = |v: &VarMap, g: crate::nn::ParamGroups| Adam::new(AdamConfig { lr: 1e-2, ..AdamConfig::default() }, g, v);
+                if sharded {
+                    let mut sa = ShardedDataParallel::new(&mut a, vars.clone(), crate::nn::ParamGroups::new(&vars), ShardOptions::new(ShardStage::Gradients), make).unwrap();
+                    sa.step(&mut a, 1, Reduce::Mean, 1.0, |l, i| gate_loss(&cfg, l, &[i, i + 1], i as u64)).unwrap();
+                    sa.save_sharded(&mut a, &dir, 1, 1).unwrap();
+                } else {
+                    data_parallel_step(&mut a, &mut vars, &mut adam, 1, Reduce::Mean, 1.0, |l, i| gate_loss(&cfg, l, &[i, i + 1], i as u64)).unwrap();
+                    Checkpoint::save(&mut a, &dir, 1, 1, &vars, &adam).unwrap();
+                }
+                let mut b = make_group(to);
+                let e = if sharded {
+                    let sb = ShardedDataParallel::new(&mut b, vars.clone(), crate::nn::ParamGroups::new(&vars), ShardOptions::new(ShardStage::Gradients), make).unwrap();
+                    sb.load_sharded_latest(&mut b, &dir).map(|_| ()).unwrap_err()
+                } else {
+                    Checkpoint::load_latest(&mut b, &dir).map(|_| ()).unwrap_err()
+                };
+                assert!(e.to_string().contains("(another matmul precision: resume refused)"), "{from:?} to {to:?}, sharded {sharded}: {e}");
+                std::fs::remove_dir_all(&dir).unwrap();
+            }
+        }
+        set_matmul_precision(MatmulPrecision::F32);
+        crate::tensor::set_default_device(crate::tensor::Device::Cpu(crate::tensor::CpuMode::Reference)).unwrap();
+    }
 }

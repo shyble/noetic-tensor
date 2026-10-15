@@ -284,8 +284,9 @@ impl Checkpoint {
     ///   node copies are used only if they hold the same bytes.
     /// - The checkpoint must hold a cursor for every rank.
     /// - A checkpoint of another world size or job key is refused, and one taken under another
-    ///   group key (another platform or device: a CPU checkpoint on a GPU, another GPU model or
-    ///   driver) too.
+    ///   group key too; the reason names the part that differs: the mode (deterministic or fast),
+    ///   the matmul precision (f32 or the reduced-precision product), or the platform or device (a
+    ///   CPU checkpoint on a GPU, another GPU model or driver).
     pub fn load_latest(group: &mut ProcessGroup, dir: &Path) -> Result<Option<Checkpoint>> {
         let latest = dir.join("latest");
         let mine: Result<Option<Checkpoint>> = if latest.exists() {
@@ -315,10 +316,11 @@ impl Checkpoint {
         }
         if c.meta.group_key != group.key() {
             return Err(NnError::Dist(format!(
-                "the checkpoint at step {} was taken under the key {:?}; this run's key is {:?} (another platform or device: resume refused)",
+                "the checkpoint at step {} was taken under the key {:?}; this run's key is {:?} (another {}: resume refused)",
                 c.meta.step,
                 c.meta.group_key,
-                group.key()
+                group.key(),
+                super::group::key_difference(&c.meta.group_key, &group.key())
             )));
         }
         if c.meta.cursors.len() != group.world_size() {
