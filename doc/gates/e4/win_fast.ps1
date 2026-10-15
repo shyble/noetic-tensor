@@ -3,11 +3,12 @@
 # reference backend and on CUDA (every rank sharing the machine's one GPU). Run from the source
 # tree after `cargo +1.94.1 build --release -j 2 --features cuda --examples`:
 #
-#   powershell -NoProfile -ExecutionPolicy Bypass -File doc\gates\e4\win_fast.ps1
+#   powershell -NoProfile -ExecutionPolicy Bypass -File doc\gates\e4\win_fast.ps1 [-Devices cpu,cuda]
 #
 # The script, and every process it starts, runs on 2 logical CPUs at below-normal priority (the
 # machine is shared): 4 ranks share those 2 CPUs. Logs go to doc\gates\e4\logs\win-fast.log. The
 # fast mode is not reproducible bit for bit: its losses are compared with a tolerance.
+param([string]$Devices = 'cpu,cuda')
 $ErrorActionPreference = 'Continue'
 $me = [System.Diagnostics.Process]::GetCurrentProcess()
 $me.ProcessorAffinity = [IntPtr]3
@@ -70,7 +71,7 @@ function Synced([string]$dir) {
     if ((Get-Content "$dir\record.txt")[0] -match 'weight_checks=\d+ ok') { 'every per-step weight check passed on every rank' } else { $script:fail = 1; 'WEIGHT CHECKS FAILED' }
 }
 
-foreach ($device in @('cpu', 'cuda')) {
+foreach ($device in $Devices.Split(',')) {
     Say "## $device : the gate's model, 12 steps, M 4"
     if (-not (Ref "$device-det-ref" $device @('--micro', '4'))) { continue }
     Say "deterministic M 4, 1 process: final weights sha256 $(Final "$work\$device-det-ref")"
