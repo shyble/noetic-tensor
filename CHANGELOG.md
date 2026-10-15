@@ -1,5 +1,17 @@
 # Changes
 
+## Unreleased
+
+Documentation only; no code changed. The 0.6.0 release's deterministic mode, with every 0.6.0 option off, was tested on two GPUs in one machine and on two machines:
+
+Tested on rented cloud machines, with each setup's key in `doc/distributed.md` ("Two GPUs in one machine, and two machines"):
+- 2 L4 GPUs in one machine (driver 580.126.09): data-parallel with one rank per GPU (world size 2) and two ranks per GPU (world size 4), and sharded (stages 1–3, world size 2), equal to one GPU with accumulation;
+- 2 machines with one L4 each over a private network (driver 595.91.07): data-parallel with one GPU each (world size 2) and on the CPU (world sizes 2 and 4), equal to one machine.
+
+Deterministic path only. Untested: more than 2 GPUs or 2 machines, other GPU models and drivers, NCCL, and the fast mode, half-precision products and mixed precision on these machines.
+
+Shown: byte-identical final weights against one GPU or one machine with accumulation (and every per-step hash in the GPU runs), and a killed rank resumed from a checkpoint, on both setups; refusals before step 0 (another secret, no secret, a CPU rank in a GPU job) across the two machines. The engine's own tests passed on the two-GPU machine's CPU and CUDA backends, with the tests of the 0.6.0 options skipped by name. Sharding was tested on two GPUs in one machine only. On the two-GPU machine, `Cuda(1)` gave `Cuda(0)`'s results bit for bit.
+
 ## 0.6.0
 
 Released 15 October 2026. Three opt-in features, each off by default and each under its own key: a fast mode for data-parallel and sharded training, reduced-precision matrix products on the GPU, and mixed precision. Each is built; tested on one machine per device kind; multi-GPU, multi-machine and datacenter runs untested. The fast mode is not reproducible bit for bit. Fast, half-precision and mixed-precision results are never compared byte for byte with, or pooled with, f32 or deterministic-mode results. With every option off, the 0.5.0 results are unchanged (the gates' weights, the single-device configurations' bytes, on the CPU, CUDA and Metal).
