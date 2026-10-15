@@ -50,6 +50,9 @@ mod metal {
     mod kernels {
         include!("kernels.rs");
     }
+    mod half_gemm {
+        include!("half_gemm.rs");
+    }
     mod only {
         include!("metal_only.rs");
     }
@@ -112,6 +115,9 @@ mod cuda {
     }
     mod kernels {
         include!("kernels.rs");
+    }
+    mod half_gemm {
+        include!("half_gemm.rs");
     }
     mod only {
         include!("cuda_only.rs");

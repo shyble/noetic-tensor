@@ -49,6 +49,8 @@ pub(crate) struct Ctx {
     stream: CUstream,
     module: CUmodule,
     funcs: HashMap<&'static str, CUfunction>,
+    /// The reduced-precision product's module (`half_gemm`), loaded on its first use.
+    half: Option<CUmodule>,
     /// The stream-ordered allocator (memory pools) is available.
     pools: bool,
     name: String,
@@ -212,7 +214,7 @@ impl Ctx {
             let ptx = compile(super::kernels::SOURCE, cc)?;
             let mut module: CUmodule = std::ptr::null_mut();
             cu(cuModuleLoadData(&mut module, ptx.as_ptr() as *const c_void), "cuModuleLoadData")?;
-            Ok(Ctx { ctx, stream, module, funcs: HashMap::new(), pools, name: CStr::from_ptr(name.as_ptr()).to_string_lossy().into_owned(), cc, driver, nvrtc: (vmaj, vmin), launches: 0, prof: Prof::default(), tag: None })
+            Ok(Ctx { ctx, stream, module, funcs: HashMap::new(), half: None, pools, name: CStr::from_ptr(name.as_ptr()).to_string_lossy().into_owned(), cc, driver, nvrtc: (vmaj, vmin), launches: 0, prof: Prof::default(), tag: None })
         }
     }
 
@@ -280,12 +282,35 @@ impl Ctx {
         if let Some(f) = self.funcs.get(kernel) {
             return Ok(*f);
         }
+        // The reduced-precision kernels live in their own module, compiled on first use.
+        let module = if kernel.starts_with("hgemm_") { self.half_module()? } else { self.module };
         let n = CString::new(kernel).unwrap();
         let mut f: CUfunction = std::ptr::null_mut();
         // SAFETY: a loaded module and a NUL-terminated name.
-        cu(unsafe { cuModuleGetFunction(&mut f, self.module, n.as_ptr()) }, kernel)?;
+        cu(unsafe { cuModuleGetFunction(&mut f, module, n.as_ptr()) }, kernel)?;
         self.funcs.insert(kernel, f);
         Ok(f)
+    }
+
+    /// Whether the device has bf16 tensor-core instructions (compute capability 8.0 or later).
+    fn has_bf16_mma(&self) -> bool {
+        self.cc.0 >= 8
+    }
+
+    /// The reduced-precision product's module (`half_gemm::SOURCE`), compiled and loaded once.
+    fn half_module(&mut self) -> Result<CUmodule> {
+        if let Some(m) = self.half {
+            return Ok(m);
+        }
+        if !self.has_bf16_mma() {
+            return Err(TensorError::Unsupported(format!("a bf16 tensor-core product on {} (compute capability {}.{}; 8.0 or later needed)", self.name, self.cc.0, self.cc.1)));
+        }
+        let ptx = compile(super::half_gemm::SOURCE, self.cc)?;
+        let mut m: CUmodule = std::ptr::null_mut();
+        // SAFETY: NUL-terminated PTX from NVRTC; the context is current.
+        cu(unsafe { cuModuleLoadData(&mut m, ptx.as_ptr() as *const c_void) }, "cuModuleLoadData (half_gemm)")?;
+        self.half = Some(m);
+        Ok(m)
     }
 
     /// Queue `kernel` on the stream with `grid` blocks of `block` threads and `args` in order.
@@ -509,6 +534,36 @@ const SPLIT_BELOW_TILES: usize = 48;
 /// Grid z is limited to 65 535: larger batches run as several launches.
 const MAX_Z: usize = 65_535;
 
+/// A batched product's plan, as `matmul` makes it: the output shape, the batch count, the
+/// per-batch (A, B) element offsets and (m, k, n).
+fn matmul_plan(al: &Layout, bl: &Layout) -> Result<(Vec<usize>, usize, Vec<u32>, (usize, usize, usize))> {
+    let (ash, bsh) = (&al.shape, &bl.shape);
+    let r = ash.len();
+    if r < 2 || bsh.len() != r || ash[r - 1] != bsh[r - 2] {
+        return Err(TensorError::Shape(format!("matmul {ash:?} × {bsh:?}")));
+    }
+    let (m, k, n) = (ash[r - 2], ash[r - 1], bsh[r - 1]);
+    let batch = crate::tensor::shape::broadcast(&ash[..r - 2], &bsh[..r - 2]);
+    let nb: usize = batch.iter().product();
+    let mut offs: Vec<u32> = Vec::with_capacity(nb * 2);
+    let mut idx = vec![0usize; batch.len()];
+    for _ in 0..nb {
+        let at = |l: &Layout| -> usize { l.offset + idx.iter().enumerate().map(|(i, &q)| if l.shape[i] == 1 { 0 } else { q * l.strides[i] }).sum::<usize>() };
+        offs.push(u32_of(at(al), "offset")?);
+        offs.push(u32_of(at(bl), "offset")?);
+        for d in (0..batch.len()).rev() {
+            idx[d] += 1;
+            if idx[d] < batch[d] {
+                break;
+            }
+            idx[d] = 0;
+        }
+    }
+    let mut shape = batch;
+    shape.extend([m, n]);
+    Ok((shape, nb, offs, (m, k, n)))
+}
+
 impl GpuBackend for CudaBackend {
     fn upload(&self, device: Device, s: &CpuStorage) -> Result<GpuStorage> {
         let mut c = context()?;
@@ -690,6 +745,40 @@ impl GpuBackend for CudaBackend {
         };
         c.run1(kernel, &[Arg::Buf(mem(x)), Arg::Buf(mem(&y)), Arg::Bytes(bytes_of(&nn))], 1)?;
         Ok(y)
+    }
+
+    fn matmul_half(&self, a: &GpuStorage, al: &Layout, b: &GpuStorage, bl: &Layout) -> Result<(GpuStorage, Vec<usize>)> {
+        f32s(a)?;
+        f32s(b)?;
+        let (shape, nb, offs, (m, k, n)) = matmul_plan(al, bl)?;
+        let r = al.shape.len();
+        let mut c = context()?;
+        let y = out(&mut c, a, DType::F32, nb * m * n)?;
+        if nb > 0 && m > 0 && n > 0 {
+            u32_of(nb * m * n, "elements")?;
+            let ob = c.upload(raw_bytes(&offs))?;
+            let mut p = MatmulParams { m: u32_of(m, "m")?, n: u32_of(n, "n")?, k: u32_of(k, "k")?, a_rs: u32_of(al.strides[r - 2], "stride")?, a_cs: u32_of(al.strides[r - 1], "stride")?, b_rs: u32_of(bl.strides[r - 2], "stride")?, b_cs: u32_of(bl.strides[r - 1], "stride")?, zbase: 0, nkc: 0 };
+            // 64×64 output tiles, whatever the shape (one configuration).
+            let (gx, gy) = (u32_of(n.div_ceil(64), "grid")?, u32_of(m.div_ceil(64), "grid")?);
+            let mut z0 = 0;
+            while z0 < nb {
+                let nz = (nb - z0).min(MAX_Z);
+                p.zbase = z0 as u32;
+                c.tag = Some("hgemm bf16");
+                c.launch("hgemm_bf16_f32acc", (gx, gy, nz as u32), 128, &[Arg::Buf(mem(a)), Arg::Buf(mem(b)), Arg::Buf(mem(&y)), Arg::Buf(&ob), Arg::Bytes(bytes_of(&p))])?;
+                z0 += nz;
+            }
+        }
+        Ok((y, shape))
+    }
+
+    fn half_gemm_key(&self) -> Result<String> {
+        let c = context()?;
+        if !c.has_bf16_mma() {
+            return Err(TensorError::Unsupported(format!("a bf16 tensor-core product on {} (compute capability {}.{}; 8.0 or later needed)", c.name, c.cc.0, c.cc.1)));
+        }
+        let src = crate::hash::sha256_hex(super::half_gemm::SOURCE.as_bytes());
+        Ok(format!("gemm-{}-kernels-{}", super::half_gemm::CONFIG, &src[..16]))
     }
 
     fn matmul(&self, a: &GpuStorage, al: &Layout, b: &GpuStorage, bl: &Layout) -> Result<(GpuStorage, Vec<usize>)> {

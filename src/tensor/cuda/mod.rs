@@ -13,6 +13,7 @@
 pub mod backend;
 pub use backend::{memory, profile_start, profile_take, ProfileReport};
 mod ffi;
+pub(crate) mod half_gemm;
 pub(crate) mod kernels;
 #[cfg(test)]
 mod sweep;

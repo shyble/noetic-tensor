@@ -8,6 +8,7 @@
 
 pub(crate) mod backend;
 pub(crate) mod ffi;
+pub(crate) mod half_gemm;
 pub(crate) mod shaders;
 
 use ffi::{msg, Id, MTLSize, Pool};
@@ -153,6 +154,8 @@ pub(crate) struct Context {
     device: Id,
     queue: Id,
     library: Id,
+    /// The reduced-precision product's library (`half_gemm`), compiled on its first use.
+    half_library: Option<Id>,
     pipelines: HashMap<&'static str, Id>,
     /// The open command buffer and its compute encoder (both retained), if any work is encoded.
     open: Option<(Id, Id)>,
@@ -300,6 +303,33 @@ pub fn memory() -> Option<(u64, u64)> {
 }
 
 /// The Metal context (created on first use). Refused in a pinned process.
+/// A library compiled from `source` with fast math off (safe math mode and precise functions where
+/// the OS has them; fastMathEnabled = NO before macOS 15).
+///
+/// # Safety
+/// `device` is a live Metal device.
+unsafe fn compile_library(device: Id, source: &str) -> std::result::Result<Id, String> {
+    let cls = ffi::class(c"MTLCompileOptions");
+    let opts: Id = msg!(Id; msg!(Id; cls, "alloc"), "init");
+    if ffi::responds(opts, ffi::sel!("setMathMode:")) {
+        msg!((); opts, "setMathMode:", ffi::MTLMathModeSafe => isize);
+        if ffi::responds(opts, ffi::sel!("setMathFloatingPointFunctions:")) {
+            msg!((); opts, "setMathFloatingPointFunctions:", ffi::MTLMathFloatingPointFunctionsPrecise => isize);
+        }
+    } else {
+        msg!((); opts, "setFastMathEnabled:", false => bool);
+    }
+    let src = ffi::nsstring(source);
+    let mut err: Id = std::ptr::null_mut();
+    let library: Id = msg!(Id; device, "newLibraryWithSource:options:error:", src => Id, opts => Id, &mut err as *mut Id => *mut Id);
+    ffi::release(src);
+    ffi::release(opts);
+    if library.is_null() {
+        return Err(ffi::error_text(err));
+    }
+    Ok(library)
+}
+
 pub(crate) fn context() -> std::result::Result<MutexGuard<'static, Context>, String> {
     if crate::tensor::device::is_pinned() {
         return Err("this process is pinned to the reference backend; Metal cannot be initialised".into());
@@ -324,27 +354,8 @@ impl Context {
             if queue.is_null() {
                 return Err("Metal: newCommandQueue failed".into());
             }
-            // Compile options: fast math off (safe math mode and precise functions where the OS
-            // has them; fastMathEnabled = NO before macOS 15).
-            let cls = ffi::class(c"MTLCompileOptions");
-            let opts: Id = msg!(Id; msg!(Id; cls, "alloc"), "init");
-            if ffi::responds(opts, ffi::sel!("setMathMode:")) {
-                msg!((); opts, "setMathMode:", ffi::MTLMathModeSafe => isize);
-                if ffi::responds(opts, ffi::sel!("setMathFloatingPointFunctions:")) {
-                    msg!((); opts, "setMathFloatingPointFunctions:", ffi::MTLMathFloatingPointFunctionsPrecise => isize);
-                }
-            } else {
-                msg!((); opts, "setFastMathEnabled:", false => bool);
-            }
-            let src = ffi::nsstring(shaders::SOURCE);
-            let mut err: Id = std::ptr::null_mut();
-            let library: Id = msg!(Id; device, "newLibraryWithSource:options:error:", src => Id, opts => Id, &mut err as *mut Id => *mut Id);
-            ffi::release(src);
-            ffi::release(opts);
-            if library.is_null() {
-                return Err(format!("Metal: the kernels did not compile: {}", ffi::error_text(err)));
-            }
-            Ok(Context { device, queue, library, pipelines: HashMap::new(), open: None, open_count: 0, inflight: Vec::new(), name, dispatches: 0, commits: 0, prof: Default::default(), trace: None })
+            let library = compile_library(device, shaders::SOURCE).map_err(|e| format!("Metal: the kernels did not compile: {e}"))?;
+            Ok(Context { device, queue, library, half_library: None, pipelines: HashMap::new(), open: None, open_count: 0, inflight: Vec::new(), name, dispatches: 0, commits: 0, prof: Default::default(), trace: None })
         }
     }
 
@@ -380,15 +391,30 @@ impl Context {
         }
     }
 
+    /// The reduced-precision product's library (`half_gemm::SOURCE`), compiled once, with the
+    /// same options as the f32 kernels.
+    fn half_library(&mut self) -> std::result::Result<Id, String> {
+        if let Some(l) = self.half_library {
+            return Ok(l);
+        }
+        let _pool = Pool::new();
+        // SAFETY: a live device.
+        let l = unsafe { compile_library(self.device, half_gemm::SOURCE) }.map_err(|e| format!("Metal: the half-precision product did not compile: {e}"))?;
+        self.half_library = Some(l);
+        Ok(l)
+    }
+
     fn pipeline(&mut self, kernel: &'static str) -> std::result::Result<Id, String> {
         if let Some(p) = self.pipelines.get(kernel) {
             return Ok(*p);
         }
+        // The reduced-precision kernels live in their own library, compiled on first use.
+        let library = if kernel.starts_with("hgemm_") { self.half_library()? } else { self.library };
         let _pool = Pool::new();
         // SAFETY: exact signatures; the name string and function are released after use.
         unsafe {
             let n = ffi::nsstring(kernel);
-            let f: Id = msg!(Id; self.library, "newFunctionWithName:", n => Id);
+            let f: Id = msg!(Id; library, "newFunctionWithName:", n => Id);
             ffi::release(n);
             if f.is_null() {
                 return Err(format!("Metal: no kernel named {kernel}"));
