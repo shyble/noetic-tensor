@@ -25,7 +25,8 @@ for t in ref new; do
   mkdir -p "$work/$t"
 done
 git -C "$root" archive "$ref" | tar -x -C "$work/ref"
-git -C "$root" archive HEAD | tar -x -C "$work/new"
+# TREE: the commit to test (HEAD by default; `git stash create` gives one for the working tree).
+git -C "$root" archive "${TREE:-HEAD}" | tar -x -C "$work/new"
 for t in ref new; do
   cp "$here/single_device_probe.rs" "$work/$t/examples/"
   (
@@ -41,7 +42,7 @@ for t in ref new; do
   ) > "$work/$t.out" 2>&1
 done
 {
-  echo "# E2 single-device differential, $label: the reference ${ref#v} (its release tag) against this tree (HEAD), device $device"
+  echo "# E2 single-device differential, $label: the reference ${ref#v} (its release tag) against $(if [ -n "${TREE:-}" ]; then echo "the working tree"; else echo "this tree (HEAD)"; fi), device $device"
   echo "# $(rustc --version | sed 's/ (.*//'); $(uname -sm); $(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo "## reference"
   cat "$work/ref.out"

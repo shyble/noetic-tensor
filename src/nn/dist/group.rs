@@ -54,6 +54,29 @@ pub struct GroupOptions {
     /// `from_env`, and without one the job is unauthenticated (isolated development networks
     /// only).
     pub secret: Option<JobSecret>,
+    /// The engine and wire-protocol versions this rank says at the rendezvous (`wire_version`);
+    /// another value only in tests, to stand for another engine.
+    pub(crate) wire: String,
+}
+
+/// The wire protocol's version: 2 since 0.5.0 (the reduce-scatter's message); 0.3.0 and 0.4.0
+/// spoke version 1 and said none.
+pub const WIRE_PROTOCOL: u32 = 2;
+
+/// What a rank says about its engine at the rendezvous: `engine=<crate version> wire=<protocol>`.
+/// It travels after the platform key in the hello, and rank 0 refuses a rank that says anything
+/// else, before step 0; it is not part of the group's key.
+pub fn wire_version() -> String {
+    format!("engine={} wire={WIRE_PROTOCOL}", env!("CARGO_PKG_VERSION"))
+}
+
+/// A hello's platform field split into the platform key and the engine's versions (None: a rank
+/// of an engine that said none, 0.4.0 or earlier).
+fn split_wire(s: &str) -> (&str, Option<&str>) {
+    match s.rfind(" engine=") {
+        Some(i) => (&s[..i], Some(&s[i + 1..])),
+        None => (s, None),
+    }
 }
 
 impl GroupOptions {
@@ -101,7 +124,7 @@ impl GroupOptions {
 
 impl Default for GroupOptions {
     fn default() -> Self {
-        GroupOptions { job_key: String::new(), timeout: Duration::from_secs(600), connect_timeout: Duration::from_secs(120), chunk_elems: 1 << 20, platform: super::env::platform_key(), device: Device::Cpu(CpuMode::Reference), secret: None }
+        GroupOptions { job_key: String::new(), timeout: Duration::from_secs(600), connect_timeout: Duration::from_secs(120), chunk_elems: 1 << 20, platform: super::env::platform_key(), device: Device::Cpu(CpuMode::Reference), secret: None, wire: wire_version() }
     }
 }
 
@@ -287,6 +310,8 @@ impl ProcessGroup {
             return Err(NnError::Dist(format!("rank {rank} is not in 0..{world}")));
         }
         let platform = ProcessGroup::rank_platform(&opts)?;
+        // The hello's platform field: the platform key, then the engine's versions.
+        let said = format!("{platform} {}", opts.wire);
         if world == 1 {
             return Ok(ProcessGroup { env: env.clone(), opts, platform, peers: vec![None], seq: 0, checks: WeightChecks::default() });
         }
@@ -325,8 +350,11 @@ impl ProcessGroup {
                     Some(format!("rank {r} has world size {w}, rank 0 has {world}"))
                 } else if key != opts.job_key {
                     Some(format!("rank {r} has job key {key:?}, rank 0 has {:?}", opts.job_key))
-                } else if their_platform != platform {
-                    Some(format!("rank {r} runs on platform {their_platform:?}, rank 0 on {platform:?} (a mixed job)"))
+                } else if split_wire(&their_platform).1 != Some(opts.wire.as_str()) {
+                    let theirs = split_wire(&their_platform).1.unwrap_or("no version (an engine of 0.4.0 or earlier)");
+                    Some(format!("rank {r} runs {theirs}, rank 0 runs {} (a mixed-version job)", opts.wire))
+                } else if split_wire(&their_platform).0 != platform {
+                    Some(format!("rank {r} runs on platform {:?}, rank 0 on {platform:?} (a mixed job)", split_wire(&their_platform).0))
                 } else if r == 0 || r >= world || joined[r].is_some() {
                     Some(format!("a second rank {r} (or one outside 1..{world})"))
                 } else {
@@ -384,7 +412,7 @@ impl ProcessGroup {
             d.done()?;
             let mine = auth::challenge();
             let mut e = Enc::default();
-            e.u64(rank as u64).u64(world as u64).str(&opts.job_key).str(&platform).str(&TcpListener::local_addr(&data).map_err(dist("listener"))?.to_string()).bytes(&mine);
+            e.u64(rank as u64).u64(world as u64).str(&opts.job_key).str(&said).str(&TcpListener::local_addr(&data).map_err(dist("listener"))?.to_string()).bytes(&mine);
             let proof = auth::answer(secret, "hello", &theirs, &e.0);
             e.bytes(&proof);
             wire::send(&mut s, Op::Hello, rank, 0, &e.0)?;

@@ -542,8 +542,11 @@ impl<O> ShardedDataParallel<O> {
     /// var map under the vars' names) and their options, as one would build it for whole vars
     /// (`|vars, groups| Adam::new(cfg, groups, vars)`). Every rank calls it (a collective).
     ///
-    /// Refused: vars off the group's device or not f32, a var without elements, and lazy rows,
-    /// multiplier tensors or per-seed rates on a var cut into pieces.
+    /// Refused, with one error each: vars off the group's device or not f32, a var without
+    /// elements, and, on a var cut into pieces (`Partition::Flat` at world size 2 or more), lazy
+    /// rows ("lazy rows need its [S, R, C] shape"), a multiplier tensor ("its multiplier tensor
+    /// broadcasts against its shape") and per-seed learning rates ("per-seed learning rates need
+    /// its seed axis"). `Partition::ByVar` keeps every var whole, and takes all three.
     pub fn new(group: &mut ProcessGroup, vars: VarMap, groups: ParamGroups, opts: ShardOptions, make: impl FnOnce(&VarMap, ParamGroups) -> O) -> Result<Self> {
         let device = group.device();
         let check = (|| {
@@ -557,13 +560,17 @@ impl<O> ShardedDataParallel<O> {
                 return Err(NnError::Dist("the parameter groups are for another var map".into()));
             }
             let layout = ShardLayout::new(&vars, group.world_size(), opts.partition)?;
+            // Options that need a var's shape are refused on a var cut into pieces (one error each).
             for i in (0..vars.len()).filter(|i| layout.is_split(*i)) {
-                let o = groups.options(i);
-                if o.lazy_rows || groups.multiplier(i).is_some() || groups.seed_lr().is_some() {
-                    return Err(NnError::Dist(format!(
-                        "var {:?} is cut into pieces, and its lazy rows, multiplier tensor or per-seed rates need its shape (use Partition::ByVar)",
-                        vars.names()[i]
-                    )));
+                let name = &vars.names()[i];
+                if groups.options(i).lazy_rows {
+                    return Err(NnError::Dist(format!("var {name:?} is cut into pieces: lazy rows need its [S, R, C] shape (refused; Partition::ByVar keeps every var whole)")));
+                }
+                if groups.multiplier(i).is_some() {
+                    return Err(NnError::Dist(format!("var {name:?} is cut into pieces: its multiplier tensor broadcasts against its shape (refused; Partition::ByVar keeps every var whole)")));
+                }
+                if groups.seed_lr().is_some() {
+                    return Err(NnError::Dist(format!("var {name:?} is cut into pieces: per-seed learning rates need its seed axis (refused; Partition::ByVar keeps every var whole)")));
                 }
             }
             Ok(layout)
