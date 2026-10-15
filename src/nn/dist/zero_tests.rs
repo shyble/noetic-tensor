@@ -291,10 +291,47 @@ fn sharding_refuses_what_its_pieces_cannot_hold() {
     });
     for r in res {
         let (e1, ok, e2, e3) = r.unwrap();
-        assert!(e1.contains("Partition::ByVar"), "{e1}");
+        assert!(e1.contains("per-seed learning rates need its seed axis"), "{e1}");
         assert!(ok);
         assert!(e2.contains("differ"), "{e2}");
         assert!(e3.contains("f32"), "{e3}");
+    }
+}
+
+/// Lazy rows, multiplier tensors and per-seed learning rates need a var's shape: each is refused,
+/// with its own error, on vars cut into flat pieces at world size 2, on every rank, and accepted
+/// by var (every var whole).
+#[test]
+fn flat_pieces_refuse_lazy_rows_multipliers_and_per_seed_rates() {
+    let res = on_ranks(2, opts("flat refusals"), |g| {
+        let (vars, _) = gate_state(false);
+        // A [S, R, C] var cut into pieces at world size 2.
+        let name = vars.iter().find(|(_, t)| t.rank() == 3).map(|(n, _)| n.to_string()).expect("a [S, R, C] var");
+        let shape = vars.var(&name).shape().to_vec();
+        let mut lazy = ParamGroups::new(&vars);
+        lazy.set_lazy_rows(&name);
+        let mut mult = ParamGroups::new(&vars);
+        mult.set_multiplier(&name, Tensor::ones([shape[0], 1, shape[2]]));
+        let mut rates = ParamGroups::new(&vars);
+        rates.set_seed_lr(vec![1.0, 0.5]);
+        let mut out = vec![];
+        for (what, groups) in [("lazy rows", lazy), ("multiplier", mult), ("per-seed rates", rates)] {
+            let flat = ShardedDataParallel::new(g, vars.clone(), groups.clone(), ShardOptions::new(ShardStage::Gradients), adam_maker());
+            let by_var = ShardedDataParallel::new(g, vars.clone(), groups, ShardOptions::new(ShardStage::Gradients).with_partition(Partition::ByVar), adam_maker());
+            out.push((what, flat.map(|_| ()).unwrap_err().message().to_string(), by_var.is_ok()));
+        }
+        out
+    });
+    for x in res {
+        for (what, e, by_var) in x.unwrap() {
+            let want = match what {
+                "lazy rows" => "lazy rows need its [S, R, C] shape",
+                "multiplier" => "its multiplier tensor broadcasts against its shape",
+                _ => "per-seed learning rates need its seed axis",
+            };
+            assert!(e.contains("is cut into pieces") && e.contains(want) && e.contains("refused"), "{what}: {e}");
+            assert!(by_var, "{what}: accepted by var");
+        }
     }
 }
 
