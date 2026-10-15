@@ -1,0 +1,41 @@
+# E4 gate 2, timing, mac-cpu: device cpu; Apple silicon, model MacBookPro18,1, 8 performance and 2 efficiency cores, 16 GiB; macOS 27.0.1
+# rustc 1.94.1; Darwin arm64; 2026-10-15T07:26:36Z; load average at the start: 4.42 5.34 5.42
+# model: width 256, 4 blocks, MLP 1024; 4 global micro-steps; 10 steps; 5 runs per configuration, in rotation; every process at background priority (taskpolicy -b), sharing the device
+# a measurement on this machine, with its key; not a statement about other hardware, networks or engines
+ref run 1: 16.364 s (load average after: 4.44 5.26 5.39)
+det-w2 run 1: 18.854 s (load average after: 5.70 5.49 5.47)
+fast-w2 run 1: 18.340 s (load average after: 5.32 5.41 5.44)
+fast-w2-noovl run 1: 20.516 s (load average after: 5.20 5.38 5.43)
+fast-w2-b1m run 1: 19.574 s (load average after: 5.50 5.43 5.44)
+ref run 2: 16.054 s (load average after: 5.50 5.43 5.44)
+det-w2 run 2: 19.224 s (load average after: 6.05 5.57 5.49)
+fast-w2 run 2: 19.891 s (load average after: 8.96 6.20 5.72)
+fast-w2-noovl run 2: 18.832 s (load average after: 7.91 6.17 5.72)
+fast-w2-b1m run 2: 34.666 s (load average after: 8.25 6.53 5.87)
+ref run 3: 16.605 s (load average after: 7.78 6.53 5.89)
+det-w2 run 3: 23.917 s (load average after: 7.60 6.62 5.94)
+fast-w2 run 3: 17.342 s (load average after: 6.84 6.52 5.92)
+fast-w2-noovl run 3: 18.004 s (load average after: 6.50 6.46 5.92)
+fast-w2-b1m run 3: 18.375 s (load average after: 6.88 6.54 5.96)
+ref run 4: 14.796 s (load average after: 6.20 6.41 5.93)
+det-w2 run 4: 17.922 s (load average after: 5.86 6.31 5.90)
+fast-w2 run 4: 18.934 s (load average after: 5.44 6.17 5.87)
+fast-w2-noovl run 4: 19.101 s (load average after: 5.53 6.14 5.86)
+fast-w2-b1m run 4: 17.969 s (load average after: 5.61 6.11 5.86)
+ref run 5: 15.534 s (load average after: 5.21 5.99 5.82)
+det-w2 run 5: 18.046 s (load average after: 5.21 5.92 5.80)
+fast-w2 run 5: 17.891 s (load average after: 4.96 5.81 5.77)
+fast-w2-noovl run 5: 17.635 s (load average after: 5.81 5.95 5.82)
+fast-w2-b1m run 5: 17.568 s (load average after: 6.00 6.00 5.84)
+## median wall time per configuration (seconds for 10 steps)
+ref: median 16.054 (runs: 16.364 16.054 16.605 14.796 15.534 )
+det-w2: median 18.854 (runs: 18.854 19.224 23.917 17.922 18.046 )
+fast-w2: median 18.340 (runs: 18.340 19.891 17.342 18.934 17.891 )
+fast-w2-noovl: median 18.832 (runs: 20.516 18.832 18.004 19.101 17.635 )
+fast-w2-b1m: median 18.375 (runs: 19.574 34.666 18.375 17.969 17.568 )
+## keys
+det-w2: mode=deterministic order=flat-rank backend=tcp platform=macos-aarch64-neon-rustc_1.94.1-matrixmultiply-0.3.11 libm=<sha256> world=2 auth=hmac-sha256
+fast-w2: mode=fast order=ring world=2 bucket=26214400 overlap=on backend=tcp platform=macos-aarch64-neon-rustc_1.94.1-matrixmultiply-0.3.11 libm=<sha256> world=2 auth=hmac-sha256
+fast-w2-noovl: mode=fast order=ring world=2 bucket=26214400 overlap=off backend=tcp platform=macos-aarch64-neon-rustc_1.94.1-matrixmultiply-0.3.11 libm=<sha256> world=2 auth=hmac-sha256
+fast-w2-b1m: mode=fast order=ring world=2 bucket=1048576 overlap=on backend=tcp platform=macos-aarch64-neon-rustc_1.94.1-matrixmultiply-0.3.11 libm=<sha256> world=2 auth=hmac-sha256
+# ended 2026-10-15T07:37:03Z; load average at the end: 6.00 6.00 5.84

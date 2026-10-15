@@ -684,8 +684,17 @@ impl<O> ShardedDataParallel<O> {
     /// all-reduce (stage 1) or the reduce-scatter (stages 2–3), in flat (rank, micro-step) order,
     /// scaled by `how`. For a caller that clips them (`ShardGrads::clip_grad_norm_per_seed`)
     /// before `apply`, as every rank must then do.
+    ///
+    /// In the fast mode (`DistMode::Fast`) the sum is the fast mode's (per-rank sums, the ring in
+    /// buckets, overlap with the backward pass): stage 1 takes the ring all-reduce, stages 2–3 the
+    /// ring reduce-scatter whose segments are the ranks' pieces. Not reproducible bit for bit; the
+    /// group's key says so.
     pub fn grads(&mut self, group: &mut ProcessGroup, micro_steps_per_rank: usize, how: Reduce, mut micro: impl FnMut(&VarMap, usize) -> Tensor) -> Result<ShardGrads> {
         self.check_group(group)?;
+        group.check_precision()?;
+        if group.is_fast() {
+            return self.fast_grads(group, micro_steps_per_rank, how, micro);
+        }
         let mut sum = {
             let gathered;
             let full = match &self.params {
@@ -722,6 +731,44 @@ impl<O> ShardedDataParallel<O> {
                 let held = vals.iter().flatten().map(|v| 4 * v.len()).sum();
                 (vals, count, held)
             }
+        };
+        if count == 0 {
+            return Err(NnError::Dist("a step without micro-steps on any rank".into()));
+        }
+        self.last_grads = held;
+        let grads = pieces.iter().zip(vals).map(|(p, v)| v.map(|v| Tensor::from_data(v, self.layout.piece_shape(p)).to(self.device))).collect();
+        Ok(ShardGrads { layout: self.layout.clone(), rank: self.rank, pieces, grads, count })
+    }
+
+    /// `grads` in the fast mode.
+    fn fast_grads(&mut self, group: &mut ProcessGroup, micro_steps_per_rank: usize, how: Reduce, micro: impl FnMut(&VarMap, usize) -> Tensor) -> Result<ShardGrads> {
+        use super::fast::{fast_grads, Target};
+        let pieces = self.layout.pieces(self.rank);
+        let segments = self.layout.segments();
+        let (vals, count, held) = {
+            let gathered;
+            let full = match &self.params {
+                Params::Full(v) => v,
+                Params::Shard(_) => {
+                    gathered = self.full_params(group)?;
+                    &gathered
+                }
+            };
+            match self.opts.stage {
+                ShardStage::OptimizerState => {
+                    // The whole sum is held (the ring's all-gather), as at stage 1 of the
+                    // deterministic mode.
+                    let (total, count) = fast_grads(group, full, micro_steps_per_rank, how, Target::AllReduce, micro)?;
+                    let held = total.iter().flatten().map(|v| 4 * v.len()).sum();
+                    (pieces.iter().map(|p| total[p.var].as_ref().map(|x| x[p.lo..p.hi].to_vec())).collect::<Vec<_>>(), count, held)
+                }
+                ShardStage::Gradients | ShardStage::Parameters => {
+                    let (vals, count) = fast_grads(group, full, micro_steps_per_rank, how, Target::Scatter(&segments), micro)?;
+                    let held = vals.iter().flatten().map(|v| 4 * v.len()).sum();
+                    (vals, count, held)
+                }
+            }
+            // Stage 3: the gathered vars are dropped here, before the step's optimizer.
         };
         if count == 0 {
             return Err(NnError::Dist("a step without micro-steps on any rank".into()));
@@ -967,7 +1014,7 @@ impl<O> ShardedDataParallel<O> {
                 group.options().job_key
             ))
         } else if meta.group_key != group.key() {
-            Some(format!("the checkpoint at step {} was taken under the key {:?}; this run's key is {:?} (another platform or device: resume refused)", meta.step, meta.group_key, group.key()))
+            Some(format!("the checkpoint at step {} was taken under the key {:?}; this run's key is {:?} (another {}: resume refused)", meta.step, meta.group_key, group.key(), super::group::key_difference(&meta.group_key, &group.key())))
         } else if meta.partition != self.opts.partition.name() || meta.layout != self.layout.key() {
             Some(format!("the checkpoint at step {} holds {} pieces of another layout ({}); this run's are {} ({}) (resume refused)", meta.step, meta.partition, meta.layout, self.opts.partition.name(), self.layout.key()))
         } else if meta.cursors.len() != group.world_size() || meta.ranks.len() != group.world_size() {

@@ -155,6 +155,17 @@ pub(crate) trait GpuBackend: Sync {
     fn reduce_all(&self, op: ReduceOp, x: &GpuStorage, n: usize) -> Result<GpuStorage>;
     /// Batched matmul of two views (batch dimensions broadcast when 1); the output shape.
     fn matmul(&self, a: &GpuStorage, al: &Layout, b: &GpuStorage, bl: &Layout) -> Result<(GpuStorage, Vec<usize>)>;
+    /// `matmul` with 16-bit operands and f32 accumulation on the matrix units
+    /// (`MatmulPrecision::Half`). The default is Unsupported.
+    fn matmul_half(&self, a: &GpuStorage, al: &Layout, b: &GpuStorage, bl: &Layout) -> Result<(GpuStorage, Vec<usize>)> {
+        let _ = (a, al, b, bl);
+        Err(TensorError::Unsupported("no reduced-precision matmul on this backend".into()))
+    }
+    /// The reduced-precision product's key part (`precision::half_gemm_key`). The default is
+    /// Unsupported.
+    fn half_gemm_key(&self) -> Result<String> {
+        Err(TensorError::Unsupported("no reduced-precision matmul on this backend".into()))
+    }
     /// `gather` of contiguous x `[outer, n, inner]` at I32 indices `[outer, m, inner]`.
     fn gather(&self, x: &GpuStorage, lanes: [usize; 4], idx: &GpuStorage) -> Result<GpuStorage>;
     /// `index_select` of contiguous x `[outer, n, inner]` at `m` I32 indices.
@@ -444,13 +455,16 @@ pub(crate) fn gpu_argmax(t: &Tensor, dim: usize) -> Option<(Vec<i64>, Vec<usize>
     Some((v, out))
 }
 
-pub(crate) fn gpu_matmul(a: &Tensor, b: &Tensor) -> Option<(Storage, Vec<usize>)> {
+pub(crate) fn gpu_matmul(a: &Tensor, b: &Tensor, precision: super::precision::MatmulPrecision) -> Option<(Storage, Vec<usize>)> {
     let ga = gpu_of(&a.storage)?;
     let gb = ok(gpu_of(&b.storage).ok_or_else(|| TensorError::Unsupported("a GPU tensor with a CPU operand".into())));
     let (st, sh) = ok((|| {
         let (x, xl) = f32_operand(ga, &a.layout)?;
         let (y, yl) = f32_operand(gb, &b.layout)?;
-        be(ga).matmul(&x, &xl, &y, &yl)
+        match precision {
+            super::precision::MatmulPrecision::F32 => be(ga).matmul(&x, &xl, &y, &yl),
+            super::precision::MatmulPrecision::Half => be(ga).matmul_half(&x, &xl, &y, &yl),
+        }
     })());
     Some((Storage::Gpu(st), sh))
 }
@@ -677,9 +691,17 @@ pub fn gpu_key(device: Device) -> Result<String> {
 /// outside this crate. On CUDA, the driver release (from NVML; the driver compiles the kernels'
 /// PTX); on Metal, the GPU's families and architecture and the OS build (the OS compiles the
 /// kernels' source). `gpu_key` itself is unchanged.
+///
+/// When the calling thread's matmul precision is `MatmulPrecision::Half`, the reduced-precision
+/// product's part follows (`-gemm-…`, `precision::half_gemm_key`); with the default f32 the key
+/// is unchanged.
 pub fn gpu_platform_key(device: Device) -> Result<String> {
     let b = backend_for(device)?;
-    Ok(format!("{}-{}", b.key()?, b.platform_details()?))
+    let base = format!("{}-{}", b.key()?, b.platform_details()?);
+    Ok(match super::precision::key_part(device)? {
+        None => base,
+        Some(g) => format!("{base}-{g}"),
+    })
 }
 
 /// Wait for every kernel encoded on `device`.

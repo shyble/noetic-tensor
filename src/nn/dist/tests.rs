@@ -422,8 +422,15 @@ fn the_rendezvous_refuses_another_job_key_platform_or_world_size() {
 #[test]
 fn the_rendezvous_refuses_another_engine_or_wire_version() {
     assert_eq!(wire_version(), format!("engine={} wire={WIRE_PROTOCOL}", env!("CARGO_PKG_VERSION")));
-    assert_eq!(WIRE_PROTOCOL, 2);
-    for (name, theirs) in [("another engine", "engine=0.4.9 wire=2".to_string()), ("another protocol", format!("engine={} wire=1", env!("CARGO_PKG_VERSION"))), ("no version", String::new())] {
+    // Wire protocol 3 since 0.6.0: the hello says `wire=3`.
+    assert_eq!(WIRE_PROTOCOL, 3);
+    assert!(wire_version().ends_with(" wire=3"), "{}", wire_version());
+    for (name, theirs) in [
+        ("another engine", "engine=0.4.9 wire=3".to_string()),
+        ("0.5.0's protocol", format!("engine={} wire=2", env!("CARGO_PKG_VERSION"))),
+        ("another protocol", format!("engine={} wire=1", env!("CARGO_PKG_VERSION"))),
+        ("no version", String::new()),
+    ] {
         for odd in [1usize, 0] {
             let t = theirs.clone();
             let res = on_ranks_with(2, move |r| {
@@ -1907,3 +1914,9 @@ fn group_options_are_built_with_a_builder() {
 
 #[path = "zero_tests.rs"]
 mod zero_tests;
+
+#[path = "fast_tests.rs"]
+mod fast_tests;
+
+#[path = "mixed_tests.rs"]
+mod mixed_tests;

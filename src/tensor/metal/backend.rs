@@ -311,6 +311,57 @@ impl GpuBackend for MetalBackend {
         Ok(y)
     }
 
+    fn matmul_half(&self, a: &GpuStorage, al: &Layout, b: &GpuStorage, bl: &Layout) -> Result<(GpuStorage, Vec<usize>)> {
+        f32s(a)?;
+        f32s(b)?;
+        let (ash, bsh) = (&al.shape, &bl.shape);
+        let r = ash.len();
+        if r < 2 || bsh.len() != r || ash[r - 1] != bsh[r - 2] {
+            return Err(TensorError::Shape(format!("matmul {ash:?} × {bsh:?}")));
+        }
+        let (m, k, n) = (ash[r - 2], ash[r - 1], bsh[r - 1]);
+        let batch = crate::tensor::shape::broadcast(&ash[..r - 2], &bsh[..r - 2]);
+        let nb: usize = batch.iter().product();
+        let mut offs: Vec<u32> = Vec::with_capacity(nb * 2);
+        let mut idx = vec![0usize; batch.len()];
+        for _ in 0..nb {
+            let at = |l: &Layout| -> usize { l.offset + idx.iter().enumerate().map(|(i, &q)| if l.shape[i] == 1 { 0 } else { q * l.strides[i] }).sum::<usize>() };
+            offs.push(u32_of(at(al), "offset")?);
+            offs.push(u32_of(at(bl), "offset")?);
+            for d in (0..batch.len()).rev() {
+                idx[d] += 1;
+                if idx[d] < batch[d] {
+                    break;
+                }
+                idx[d] = 0;
+            }
+        }
+        let mut shape = batch.clone();
+        shape.extend([m, n]);
+        let mut c = ctx()?;
+        let y = out(&c, a, DType::F32, nb * m * n)?;
+        let p = MatmulParams { m: u32_of(m, "m")?, n: u32_of(n, "n")?, k: u32_of(k, "k")?, a_rs: u32_of(al.strides[r - 2], "stride")?, a_cs: u32_of(al.strides[r - 1], "stride")?, b_rs: u32_of(bl.strides[r - 2], "stride")?, b_cs: u32_of(bl.strides[r - 1], "stride")? };
+        if nb > 0 && m > 0 && n > 0 {
+            // 64×64 output tiles, whatever the shape (one configuration); 128 threads.
+            let groups = MTLSize::new(n.div_ceil(64), m.div_ceil(64), nb);
+            let threads = MTLSize::new(128, 1, 1);
+            let bytes = super::raw_bytes(&offs);
+            if bytes.len() <= 4096 {
+                c.dispatch("hgemm_f16_f32acc", &[Arg::Buf(buf(a)), Arg::Buf(buf(b)), Arg::Buf(buf(&y)), Arg::Bytes(bytes), Arg::Bytes(bytes_of(&p))], groups, threads).map_err(dev)?;
+            } else {
+                let ob = c.upload(bytes).map_err(dev)?;
+                c.dispatch("hgemm_f16_f32acc", &[Arg::Buf(buf(a)), Arg::Buf(buf(b)), Arg::Buf(buf(&y)), Arg::Buf(&ob), Arg::Bytes(bytes_of(&p))], groups, threads).map_err(dev)?;
+            }
+        }
+        Ok((y, shape))
+    }
+
+    fn half_gemm_key(&self) -> Result<String> {
+        drop(ctx()?);
+        let src = crate::hash::sha256_hex(super::half_gemm::SOURCE.as_bytes());
+        Ok(format!("gemm-{}-kernels-{}", super::half_gemm::CONFIG, &src[..16]))
+    }
+
     fn matmul(&self, a: &GpuStorage, al: &Layout, b: &GpuStorage, bl: &Layout) -> Result<(GpuStorage, Vec<usize>)> {
         f32s(a)?;
         f32s(b)?;
@@ -348,7 +399,7 @@ impl GpuBackend for MetalBackend {
             let bytes = super::raw_bytes(&offs);
             let v = super::choose_matmul(m, n, k, nb);
             if bytes.len() <= 4096 {
-                super::encode_matmul_variant(&mut c, v, buf(a), buf(b), buf(&y), super::Arg::Bytes(bytes), nb, p).map_err(dev)?;
+                super::encode_matmul_variant(&mut c, v, buf(a), buf(b), buf(&y), Arg::Bytes(bytes), nb, p).map_err(dev)?;
             } else {
                 let ob = c.upload(bytes).map_err(dev)?;
                 super::encode_matmul_variant(&mut c, v, buf(a), buf(b), buf(&y), super::Arg::Buf(&ob), nb, p).map_err(dev)?;

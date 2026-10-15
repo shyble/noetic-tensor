@@ -1,0 +1,37 @@
+# E4 gate 2 on Windows (the fast mode): rustc 1.94.1; Windows 10.0.26300.0 x86_64; 12th Gen Intel(R) Core(TM) i5-12450H; 2026-10-15T10:05:18.1232545+03:00
+# every process on 2 logical CPUs (affinity mask 3) at below-normal priority; ranks share the device; fast-mode results are compared with a tolerance, never byte for byte
+## cpu : the gate's model, 12 steps, M 4
+deterministic M 4, 1 process: final weights sha256 968508fe80c79c35340ee7227044ca2242038d6b7884858c979950c2680ead83
+deterministic M 4 W 2 : final weights sha256 968508fe80c79c35340ee7227044ca2242038d6b7884858c979950c2680ead83 (equal to 1 process, as the deterministic mode promises)
+fast M 4 W 2 buckets 25600 KiB: final weights sha256 50217b73b282a8d5ac5e3d353b027a8daa69934dc3ecf5efb1e408350ebdad91 (other bits than the deterministic run); against the deterministic losses: largest |loss difference| 4.170e-007 at step 10, largest relative 1.472e-007, over 12 steps; every per-step weight check passed on every rank
+fast M 4 W 2 buckets 16 KiB: final weights sha256 50217b73b282a8d5ac5e3d353b027a8daa69934dc3ecf5efb1e408350ebdad91 (other bits than the deterministic run); against the deterministic losses: largest |loss difference| 4.170e-007 at step 10, largest relative 1.472e-007, over 12 steps; every per-step weight check passed on every rank
+deterministic M 4 W 4 : final weights sha256 968508fe80c79c35340ee7227044ca2242038d6b7884858c979950c2680ead83 (equal to 1 process, as the deterministic mode promises)
+fast M 4 W 4 buckets 25600 KiB: final weights sha256 e556f83bbdd8eb2b88010e08ea87a72bdff612affd73e9c03560fa8bb39a97bc (other bits than the deterministic run); against the deterministic losses: largest |loss difference| 2.390e-007 at step 10, largest relative 8.434e-008, over 12 steps; every per-step weight check passed on every rank
+fast M 4 W 4 buckets 16 KiB: final weights sha256 6e288ec879ed74a596c8d9da162884f41205a4998aa4b2609e3812a9f23bbe84 (other bits than the deterministic run); against the deterministic losses: largest |loss difference| 2.380e-007 at step 3, largest relative 4.329e-008, over 12 steps; every per-step weight check passed on every rank
+fast-mode record (cpu, M 4 W 4, 16 KiB buckets): mode=fast order=ring world=4 bucket=16384 overlap=on backend=tcp platform=windows-x86_64-avx+avx2+fma-rustc_1.94.1-matrixmultiply-0.3.11 libm=<sha256> world=4 auth=hmac-sha256 weight_checks=13 ok last_weights=6e288ec879ed74a596c8d9da162884f41205a4998aa4b2609e3812a9f23bbe84 (fast mode, not reproducible bit for bit)
+## cpu : the gate's model, 200 steps, M 4
+fast W 2, 200 steps: final weights sha256 4bfd77219234a8f5e6a723ed2afd506fa2aaeb6a41604ad809fb13db73a42eab; against the deterministic losses: largest |loss difference| 1.225e-002 at step 195, largest relative 5.066e-002, over 200 steps; every per-step weight check passed on every rank
+fast W 4, 200 steps: final weights sha256 f41a709fe33597c73ba2b85becb87e8b0dbdefbad51862b6a1a878b0a6a93fc7; against the deterministic losses: largest |loss difference| 5.492e-003 at step 200, largest relative 3.977e-002, over 200 steps; every per-step weight check passed on every rank
+  step   1: deterministic 6.551885 fast W 4 6.551885 difference 0.000e+000
+  step  50: deterministic 0.168518 fast W 4 0.168518 difference 4.303e-007
+  step 100: deterministic 0.197890 fast W 4 0.197901 difference 1.095e-005
+  step 150: deterministic 0.039605 fast W 4 0.039576 difference -2.837e-005
+  step 200: deterministic 0.245942 fast W 4 0.240450 difference -5.492e-003
+## cuda : the gate's model, 12 steps, M 4
+deterministic M 4, 1 process: final weights sha256 4021208e74c5970b4ba0399cda524de9c497856635ab4a673066ebee72965d04
+deterministic M 4 W 2 : final weights sha256 4021208e74c5970b4ba0399cda524de9c497856635ab4a673066ebee72965d04 (equal to 1 process, as the deterministic mode promises)
+fast M 4 W 2 buckets 25600 KiB: final weights sha256 c341e1ef9a374e865a9ec9a90d7a375916767d6dc9d39e0ff240d268a1597229 (other bits than the deterministic run); against the deterministic losses: largest |loss difference| 3.570e-007 at step 4, largest relative 7.159e-008, over 12 steps; every per-step weight check passed on every rank
+fast M 4 W 2 buckets 16 KiB: final weights sha256 c341e1ef9a374e865a9ec9a90d7a375916767d6dc9d39e0ff240d268a1597229 (other bits than the deterministic run); against the deterministic losses: largest |loss difference| 3.570e-007 at step 4, largest relative 7.159e-008, over 12 steps; every per-step weight check passed on every rank
+deterministic M 4 W 4 : final weights sha256 4021208e74c5970b4ba0399cda524de9c497856635ab4a673066ebee72965d04 (equal to 1 process, as the deterministic mode promises)
+fast M 4 W 4 buckets 25600 KiB: final weights sha256 51014fb72db074d9107db8b3803c0f62ea182bd32943533270c75af4f735e559 (other bits than the deterministic run); against the deterministic losses: largest |loss difference| 2.980e-007 at step 5, largest relative 7.237e-008, over 12 steps; every per-step weight check passed on every rank
+fast M 4 W 4 buckets 16 KiB: final weights sha256 26568c96fc28dbdfb9c1363daec447a13b944d360733ccaeea948ba6a84e9f40 (other bits than the deterministic run); against the deterministic losses: largest |loss difference| 2.980e-007 at step 5, largest relative 7.237e-008, over 12 steps; every per-step weight check passed on every rank
+fast-mode record (cuda, M 4 W 4, 16 KiB buckets): mode=fast order=ring world=4 bucket=16384 overlap=on backend=tcp platform=windows-x86_64-avx+avx2+fma-rustc_1.94.1-matrixmultiply-0.3.11 libm=<sha256> device=cuda-NVIDIA_GeForce_RTX_4060_Laptop_GPU-sm89-driver13040-nvrtc12.6-nofastmath-fmadoff-kernels-<hex>-driver-release-617.14 world=4 auth=hmac-sha256 weight_checks=13 ok last_weights=26568c96fc28dbdfb9c1363daec447a13b944d360733ccaeea948ba6a84e9f40 (fast mode, not reproducible bit for bit)
+## cuda : the gate's model, 200 steps, M 4
+fast W 2, 200 steps: final weights sha256 39a8ca8445f9aa630fd5ce759f16d3e4ab9d528e9b77bf9b264a3df66a0f9266; against the deterministic losses: largest |loss difference| 1.580e-002 at step 200, largest relative 8.333e-002, over 200 steps; every per-step weight check passed on every rank
+fast W 4, 200 steps: final weights sha256 3d6ceb027996e09cf592c98a459df4d46e9d80aa4adcafbc9924d601ef89bd22; against the deterministic losses: largest |loss difference| 1.731e-002 at step 195, largest relative 9.460e-002, over 200 steps; every per-step weight check passed on every rank
+  step   1: deterministic 6.551885 fast W 4 6.551885 difference 0.000e+000
+  step  50: deterministic 0.168518 fast W 4 0.168518 difference -3.958e-007
+  step 100: deterministic 0.197898 fast W 4 0.197896 difference -2.200e-006
+  step 150: deterministic 0.039585 fast W 4 0.039558 difference -2.688e-005
+  step 200: deterministic 0.239185 fast W 4 0.256020 difference 1.683e-002
+# ended 2026-10-15T10:06:01.9541680+03:00, all checks passed
