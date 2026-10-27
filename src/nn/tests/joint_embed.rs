@@ -403,3 +403,120 @@ fn target_ema_save_restore() {
     assert_eq!(c.schedule, TauSchedule::Constant(0.75));
     assert!(TargetEma::from_json(&text.replace("nn.target_ema.v1", "other")).is_err());
 }
+
+// --------------------------------------------------------------------------------- VICReg
+
+/// The f64 host reference of one seed's VICReg terms (invariance, variance, covariance) for
+/// `[N, D]` rows `a`, `b`.
+fn vicreg_ref(a: &[f64], b: &[f64], n: usize, d: usize, w: VicregWeights) -> [f64; 4] {
+    let inv = a.iter().zip(b).map(|(x, y)| (x - y) * (x - y)).sum::<f64>() / (n * d) as f64;
+    let terms = |z: &[f64]| -> (f64, f64) {
+        let mean: Vec<f64> = (0..d).map(|j| (0..n).map(|i| z[i * d + j]).sum::<f64>() / n as f64).collect();
+        let c = |p: usize, q: usize| (0..n).map(|i| (z[i * d + p] - mean[p]) * (z[i * d + q] - mean[q])).sum::<f64>() / (n - 1) as f64;
+        let var = (0..d).map(|j| (w.gamma - (c(j, j) + w.eps).sqrt()).max(0.0)).sum::<f64>() / d as f64;
+        let cov = (0..d).flat_map(|p| (0..d).map(move |q| (p, q))).filter(|(p, q)| p != q).map(|(p, q)| c(p, q).powi(2)).sum::<f64>() / d as f64;
+        (var, cov)
+    };
+    let ((va, ca), (vb, cb)) = (terms(a), terms(b));
+    let (var, cov) = ((va + vb) / 2.0, ca + cb);
+    [w.invariance * inv + w.variance * var + w.covariance * cov, inv, var, cov]
+}
+
+fn vicreg_vec(v: &Vicreg) -> Vec<Vec<f64>> {
+    [&v.loss, &v.invariance, &v.variance, &v.covariance].iter().map(|t| t.to_vec_f64()).collect()
+}
+
+/// Two branches `[S, N, D]` whose dimensions have standard deviations on both sides of 1.
+fn branches(s: usize, n: usize, d: usize, seed: u64) -> (Vec<f64>, Vec<f64>) {
+    let scale: Vec<f64> = (0..d).map(|j| 0.3 + 0.5 * j as f64).collect(); // std ≈ 0.17 … 2.7
+    let a: Vec<f64> = rnd(s * n * d, seed, -1.0, 1.0).iter().enumerate().map(|(i, v)| v * scale[i % d] + 0.1 * ((i / d) % 3) as f64).collect();
+    let b: Vec<f64> = a.iter().zip(rnd(s * n * d, seed + 1, -0.3, 0.3)).map(|(x, e)| x + e).collect();
+    (a, b)
+}
+
+/// VICReg equals the f64 host reference on a fixed batch (f64 to 1e-12, f32 to 1e-5), per seed,
+/// at the default and at other weights.
+#[test]
+fn vicreg_matches_host_reference() {
+    let (s, n, d) = (3, 12, 6);
+    let (a, b) = branches(s, n, d, 120);
+    for w in [VicregWeights::default(), VicregWeights { invariance: 1.0, variance: 2.0, covariance: 0.5, gamma: 1.5, eps: 1e-3 }] {
+        for (dtype, tol) in [(DType::F64, 1e-12), (DType::F32, 1e-5)] {
+            let mk = |v: &[f64]| Tensor::from_f64s(v.to_vec(), [s, n, d], dtype);
+            let got = vicreg_vec(&vicreg(mk(&a), mk(&b), w));
+            for k in 0..s {
+                let want = vicreg_ref(&a[k * n * d..(k + 1) * n * d], &b[k * n * d..(k + 1) * n * d], n, d, w);
+                for (t, name) in ["loss", "invariance", "variance", "covariance"].iter().enumerate() {
+                    assert_close(&format!("{dtype:?} {w:?} seed {k} {name}"), &[got[t][k]], &[want[t]], tol);
+                }
+            }
+        }
+    }
+}
+
+/// Finite differences (f64) of the loss and of each term, at every element of both branches.
+#[test]
+fn vicreg_matches_finite_differences() {
+    let (s, n, d) = (2, 6, 4);
+    let (a, b) = branches(s, n, d, 130);
+    let ab: Vec<f64> = a.iter().chain(&b).cloned().collect();
+    let split = |x: Tensor| -> (Tensor, Tensor) { (x.clone().slice([0..1, 0..s, 0..n, 0..d]).reshape([s, n, d]), x.slice([1..2, 0..s, 0..n, 0..d]).reshape([s, n, d])) };
+    for term in 0..4 {
+        let f = |x: Tensor| -> Tensor {
+            let (za, zb) = split(x);
+            let v = vicreg(za, zb, VicregWeights::default());
+            [v.loss, v.invariance, v.variance, v.covariance][term].clone()
+        };
+        fd_input(&format!("VICReg term {term}"), &ab, &[2, s, n, d], &f, 1e-6, 1e-6);
+    }
+}
+
+/// The variance hinge is exactly 0 (with zero gradient) when every dimension's std is ≥ γ.
+#[test]
+fn vicreg_variance_zero_above_one() {
+    let (s, n, d) = (2, 16, 5);
+    let z: Vec<f64> = rnd(s * n * d, 140, -1.0, 1.0).into_iter().map(|v| 4.0 * v).collect(); // std ≈ 2.3
+    for dtype in [DType::F64, DType::F32] {
+        let zt = Tensor::from_f64s(z.clone(), [s, n, d], dtype).require_grad();
+        let v = vicreg_variance(&zt, 1.0, 1e-4);
+        assert!(v.to_vec_f64().iter().all(|x| *x == 0.0), "{dtype:?}: {:?}", v.to_vec_f64());
+        let g = zt.grad(&v.sum().backward()).unwrap().to_vec_f64();
+        assert!(g.iter().all(|x| *x == 0.0), "{dtype:?}: the hinge has a gradient above γ");
+    }
+}
+
+/// The covariance term is exactly 0 on whitened (orthogonal, centred) columns: four columns of
+/// the 8×8 Hadamard matrix (whose std 1.07 also leaves the variance hinge at 0).
+#[test]
+fn vicreg_covariance_zero_on_whitened_input() {
+    let h = |i: usize, j: usize| if (i & j).count_ones() % 2 == 0 { 1.0 } else { -1.0 };
+    let (n, d) = (8, 4);
+    let z: Vec<f64> = (0..n).flat_map(|i| (1..=d).map(move |j| h(i, j))).collect();
+    let z2: Vec<f64> = z.iter().chain(&z).map(|v| v * 1.5).collect(); // a second seed, scaled
+    for dtype in [DType::F64, DType::F32] {
+        let zt = Tensor::from_f64s(z2.clone(), [2, n, d], dtype);
+        assert_eq!(vicreg_covariance(&zt).to_vec_f64(), vec![0.0, 0.0], "{dtype:?}");
+        assert_eq!(vicreg_variance(&zt, 1.0, 1e-4).to_vec_f64(), vec![0.0, 0.0], "{dtype:?}");
+        let v = vicreg(zt.clone(), zt, VicregWeights::default());
+        assert_eq!(v.loss.to_vec_f64(), vec![0.0, 0.0], "{dtype:?}");
+    }
+    // Not whitened: a repeated column gives a positive term.
+    let zr: Vec<f64> = (0..n).flat_map(|i| [h(i, 1), h(i, 1), h(i, 2), h(i, 3)]).collect();
+    assert!(vicreg_covariance(&Tensor::from_f64s(zr, [1, n, d], DType::F64)).to_vec_f64()[0] > 0.1);
+}
+
+/// A constant input (0.75, so the mean is exact): every dimension's std is sqrt(ε) = 0.01, so the hinge is γ − 0.01 = 0.99,
+/// the covariance 0, the invariance 0 (equal branches) and the loss 25 · 0.99.
+#[test]
+fn vicreg_constant_input_hinge() {
+    let (s, n, d) = (2, 10, 7);
+    for dtype in [DType::F64, DType::F32] {
+        let z = Tensor::from_f64s(vec![0.75; s * n * d], [s, n, d], dtype);
+        let v = vicreg(z.clone(), z, VicregWeights::default());
+        let tol = if dtype == DType::F64 { 1e-12 } else { 1e-6 };
+        assert_close(&format!("{dtype:?} variance"), &v.variance.to_vec_f64(), &[0.99, 0.99], tol);
+        assert_eq!(v.covariance.to_vec_f64(), vec![0.0, 0.0]);
+        assert_eq!(v.invariance.to_vec_f64(), vec![0.0, 0.0]);
+        assert_close(&format!("{dtype:?} loss"), &v.loss.to_vec_f64(), &[24.75, 24.75], tol);
+    }
+}

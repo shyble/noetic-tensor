@@ -96,3 +96,72 @@ pub fn kl_div(pred_logits: Tensor, target_logits: Tensor) -> Tensor {
     let per = (logp.clone().exp() * (logp - logq)).sum_dim(r - 1);
     per.reshape([s, n]).mean_dim(1).reshape([s])
 }
+
+/// Weights and constants of `vicreg` (Bardes, Ponce and LeCun 2022). The default is the paper's:
+/// invariance λ = 25, variance μ = 25, covariance ν = 1, the hinge target γ = 1 and ε = 1e-4.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct VicregWeights {
+    pub invariance: f64,
+    pub variance: f64,
+    pub covariance: f64,
+    /// The standard deviation each dimension is pushed up to.
+    pub gamma: f64,
+    /// Added to the variance under the square root.
+    pub eps: f64,
+}
+
+impl Default for VicregWeights {
+    fn default() -> Self {
+        VicregWeights { invariance: 25.0, variance: 25.0, covariance: 1.0, gamma: 1.0, eps: 1e-4 }
+    }
+}
+
+/// The VICReg loss and its terms, each per seed `[S]`.
+#[derive(Clone, Debug)]
+pub struct Vicreg {
+    /// λ·invariance + μ·variance + ν·covariance.
+    pub loss: Tensor,
+    /// The mean squared difference of the two branches.
+    pub invariance: Tensor,
+    /// The mean of the two branches' variance hinges.
+    pub variance: Tensor,
+    /// The sum of the two branches' covariance terms.
+    pub covariance: Tensor,
+}
+
+/// The variance hinge of `z` `[S, N, D]` per seed, `[S]`: `mean_j max(0, γ − sqrt(Var_j + ε))`
+/// with the unbiased variance over the N rows (N ≥ 2).
+pub fn vicreg_variance(z: &Tensor, gamma: f64, eps: f64) -> Tensor {
+    let [s, n, _] = z.dims();
+    assert!(n >= 2, "VICReg: {n} rows (at least 2)");
+    let zc = z.clone() - z.clone().mean_dim(1);
+    let var = (zc.clone() * zc).sum_dim(1).div_scalar((n - 1) as f64); // [S, 1, D]
+    let std = var.add_scalar(eps).sqrt();
+    std.neg().add_scalar(gamma).clamp_min(0.0).mean_dim(2).reshape([s])
+}
+
+/// The covariance term of `z` `[S, N, D]` per seed, `[S]`: the sum of the squared off-diagonal
+/// entries of the unbiased covariance `Zcᵀ·Zc / (N − 1)`, divided by D.
+pub fn vicreg_covariance(z: &Tensor) -> Tensor {
+    let [s, n, d] = z.dims();
+    assert!(n >= 2, "VICReg: {n} rows (at least 2)");
+    let zc = z.clone() - z.clone().mean_dim(1);
+    let cov = zc.clone().swap_dims(1, 2).matmul(zc).div_scalar((n - 1) as f64); // [S, D, D]
+    let off: Vec<f64> = (0..d * d).map(|i| if i / d == i % d { 0.0 } else { 1.0 }).collect();
+    let off = Tensor::from_f64s(off, [1, d, d], cov.dtype()).to(cov.device());
+    (cov.clone() * cov * off).reshape([s, d * d]).sum_dim(1).reshape([s]).div_scalar(d as f64)
+}
+
+/// VICReg on two branches `za`, `zb` `[S, N, D]` (N rows each, row i of one the pair of row i of
+/// the other), per seed: `λ·mse(za, zb) + μ·(v(za) + v(zb))/2 + ν·(c(za) + c(zb))`, the
+/// reference implementation's grouping (the variance hinges averaged, the covariance terms
+/// summed). Gradients flow to both branches; detach one for a target branch.
+pub fn vicreg(za: Tensor, zb: Tensor, w: VicregWeights) -> Vicreg {
+    assert_eq!(za.shape(), zb.shape(), "VICReg: branch shapes");
+    assert_eq!(za.rank(), 3, "VICReg: [S, N, D] inputs");
+    let variance = (vicreg_variance(&za, w.gamma, w.eps) + vicreg_variance(&zb, w.gamma, w.eps)).div_scalar(2.0);
+    let covariance = vicreg_covariance(&za) + vicreg_covariance(&zb);
+    let invariance = mse(za, &zb);
+    let loss = invariance.clone().mul_scalar(w.invariance) + variance.clone().mul_scalar(w.variance) + covariance.clone().mul_scalar(w.covariance);
+    Vicreg { loss, invariance, variance, covariance }
+}

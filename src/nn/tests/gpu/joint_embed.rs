@@ -215,8 +215,61 @@ fn body_target_ema_on_the_device() {
     println!("{TAG} target EMA: 20 scheduled updates within {worst:.1e} of CpuRef (bit-equal: {bit_equal}), τ = 1 and τ = 0 exact, no target gradient, restore exact, byte-identical run to run");
 }
 
+// --------------------------------------------------------------------------------- VICReg
+
+/// VICReg's four outputs and both branches' gradients on `device`.
+fn vicreg_run(a: &[f64], b: &[f64], dims: [usize; 3], device: Device) -> Vec<Vec<f32>> {
+    nt::set_default_device(device).unwrap();
+    let za = t32(a, &dims).require_grad();
+    let zb = t32(b, &dims).require_grad();
+    let v = vicreg(za.clone(), zb.clone(), VicregWeights::default());
+    assert_eq!(v.loss.device(), device);
+    let g = v.loss.clone().sum().backward();
+    let out = vec![v.loss.to_vec(), v.invariance.to_vec(), v.variance.to_vec(), v.covariance.to_vec(), za.grad(&g).unwrap().to_vec(), zb.grad(&g).unwrap().to_vec()];
+    nt::set_default_device(R).unwrap();
+    out
+}
+
+#[test]
+#[ignore = "run by its wrapper in a fresh process"]
+fn body_vicreg_on_the_device() {
+    let dims = [3, 32, 16];
+    let n = dims.iter().product();
+    let scale: Vec<f64> = (0..16).map(|j| 0.2 + 0.15 * j as f64).collect();
+    let a: Vec<f64> = rnd(n, 300, -1.0, 1.0).iter().enumerate().map(|(i, v)| v * scale[i % 16]).collect();
+    let b: Vec<f64> = a.iter().zip(rnd(n, 301, -0.2, 0.2)).map(|(x, e)| x + e).collect();
+    let cpu = vicreg_run(&a, &b, dims, R);
+    let dev = vicreg_run(&a, &b, dims, M);
+    let mut worst = [0.0f64; 2];
+    for (i, (x, c)) in dev.iter().zip(&cpu).enumerate() {
+        let (k, tol) = if i < 4 { (0, 1e-5) } else { (1, 1e-4) };
+        let e = rel(x, c);
+        assert!(e <= tol, "{TAG} VICReg output {i}: {e:e} from CpuRef");
+        worst[k] = worst[k].max(e);
+    }
+    let again = vicreg_run(&a, &b, dims, M);
+    for (i, (x, c)) in dev.iter().zip(&again).enumerate() {
+        assert_bits(&format!("{TAG} VICReg run-to-run {i}"), x, c);
+    }
+    nt::set_default_device(M).unwrap();
+    // Above γ: the hinge is 0 with no gradient.
+    let big = t32(&rnd(2 * 16 * 5, 302, -4.0, 4.0), &[2, 16, 5]).require_grad();
+    let v = vicreg_variance(&big, 1.0, 1e-4);
+    assert!(v.to_vec().iter().all(|x| *x == 0.0));
+    assert!(big.grad(&v.sum().backward()).unwrap().to_vec().iter().all(|x| *x == 0.0));
+    // Whitened (Hadamard columns): covariance exactly 0.
+    let h = |i: usize, j: usize| if (i & j).count_ones() % 2 == 0 { 1.5 } else { -1.5 };
+    let wz: Vec<f64> = (0..8).flat_map(|i| (1..=4).map(move |j| h(i, j))).collect();
+    assert_eq!(vicreg_covariance(&t32(&wz, &[1, 8, 4])).to_vec(), vec![0.0]);
+    // Constant: the hinge 0.99.
+    let c = vicreg_variance(&t32(&vec![0.75; 2 * 10 * 7], &[2, 10, 7]), 1.0, 1e-4).to_vec();
+    assert!(c.iter().all(|x| (*x as f64 - 0.99).abs() <= 1e-6), "{TAG}: constant hinge {c:?}");
+    nt::set_default_device(R).unwrap();
+    println!("{TAG} VICReg: terms within {:.1e} and gradients within {:.1e} of CpuRef, zero hinge above 1, zero covariance whitened, constant hinge 0.99, byte-identical run to run", worst[0], worst[1]);
+}
+
 /// The joint-embedding bodies, in a fresh process.
 #[test]
 fn joint_embed_ops_on_the_device() {
-    crate::tensor::tests::isolated_bodies(&here!("body_"), 2);
+    crate::tensor::tests::isolated_bodies(&here!("body_"), 3);
 }
