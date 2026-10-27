@@ -77,6 +77,88 @@ pub fn cross_entropy_with(logits: Tensor, targets: &IntTensor, mask: Option<&Ten
     (loss * keep).sum_dim(1).reshape([s]) / count
 }
 
+/// How a loss reduces its elementwise values: per seed, over every element but the seed axis.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Reduction {
+    /// The elementwise losses, in the input's shape.
+    None,
+    /// The per-seed mean, `[S]` (weights scale the elements; the mean divides by the element
+    /// count, not by the weights' sum).
+    #[default]
+    Mean,
+    /// The per-seed sum, `[S]`.
+    Sum,
+}
+
+/// `loss` `[S, …]` reduced per seed.
+fn reduce(loss: Tensor, reduction: Reduction) -> Tensor {
+    let s = loss.shape()[0];
+    let n = loss.numel() / s;
+    match reduction {
+        Reduction::None => loss,
+        Reduction::Mean => loss.reshape([s, n]).mean_dim(1).reshape([s]),
+        Reduction::Sum => loss.reshape([s, n]).sum_dim(1).reshape([s]),
+    }
+}
+
+/// The weights of `binary_cross_entropy_with_logits`.
+#[derive(Clone, Debug, Default)]
+pub struct BceWeights {
+    /// A per-element weight, the logits' shape or broadcastable to it at the same rank.
+    pub weight: Option<Tensor>,
+    /// The positive class's weight p: `[C]` along the last axis (C its width), or a tensor of
+    /// the logits' rank broadcastable to them. It scales the positive term, `−p·y·log σ(x)`.
+    pub pos_weight: Option<Tensor>,
+}
+
+/// Binary cross-entropy of `targets` (in [0, 1], the logits' shape) under the logits `x`, in the
+/// stable form `max(x, 0) − x·y + log(1 + exp(−|x|))`: no term overflows, so the loss stays
+/// finite for any finite x. `max(x, 0)` is computed as `(x + |x|)/2` (equal to it in floating
+/// point) so the gradient at x = 0 is σ(0) − y = 1/2 − y, not a one-sided subgradient; elsewhere
+/// the gradient is σ(x) − y.
+///
+/// With a `pos_weight` p, the form is `(1 − y)·x + (1 + (p − 1)·y)·(max(−x, 0) + log(1 +
+/// exp(−|x|)))`, i.e. `−p·y·log σ(x) − (1 − y)·log(1 − σ(x))`; p = 1 is the plain loss. A
+/// per-element `weight` multiplies the elementwise loss before `reduction`. Gradients flow to
+/// the logits and to the targets.
+pub fn binary_cross_entropy_with_logits(logits: Tensor, targets: &Tensor, weights: Option<&BceWeights>, reduction: Reduction) -> Tensor {
+    assert_eq!(logits.shape(), targets.shape(), "BCE with logits: targets shape");
+    let r = logits.rank();
+    let y = targets.clone();
+    let ax = logits.clone().abs();
+    let softplus_neg_abs = ax.clone().neg().exp().add_scalar(1.0).log(); // log(1 + exp(−|x|))
+    let pos_weight = weights.and_then(|w| w.pos_weight.clone());
+    let loss = match pos_weight {
+        None => {
+            let relu = (logits.clone() + ax).div_scalar(2.0); // max(x, 0)
+            relu - logits * y + softplus_neg_abs
+        }
+        Some(p) => {
+            let p = if p.rank() == 1 && r > 1 {
+                let c = logits.shape()[r - 1];
+                assert_eq!(p.shape(), &[c], "BCE with logits: pos_weight [C] with C the last axis ({c})");
+                let mut sh = vec![1; r];
+                sh[r - 1] = c;
+                p.reshape_dyn(sh)
+            } else {
+                assert_eq!(p.rank(), r, "BCE with logits: pos_weight rank");
+                p
+            };
+            let lw = (p.sub_scalar(1.0) * y.clone()).add_scalar(1.0); // 1 + (p − 1)·y
+            let relu_neg = (ax - logits.clone()).div_scalar(2.0); // max(−x, 0)
+            y.neg().add_scalar(1.0) * logits + lw * (relu_neg + softplus_neg_abs)
+        }
+    };
+    let loss = match weights.and_then(|w| w.weight.clone()) {
+        Some(w) => {
+            assert_eq!(w.rank(), r, "BCE with logits: weight rank");
+            loss * w
+        }
+        None => loss,
+    };
+    reduce(loss, reduction)
+}
+
 /// Per-seed mean squared error over every element but the seed axis, `[S]`.
 pub fn mse(pred: Tensor, target: &Tensor) -> Tensor {
     let s = pred.shape()[0];
