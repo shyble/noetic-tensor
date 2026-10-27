@@ -276,3 +276,130 @@ fn set_attention_matches_finite_differences() {
     }
     assert_eq!(checked, 16);
 }
+
+// ------------------------------------------------------------------------------ TargetEma
+
+/// A two-var online map (f32) at seed `root`, S = 2.
+fn online(root: u64) -> VarMap {
+    let mut m = VarMap::new();
+    m.insert("a.w", t32(rnd(2 * 3 * 4, root, -1.0, 1.0), &[2, 3, 4])).unwrap();
+    m.insert("b.w", t32(rnd(2 * 5, root + 1, -1.0, 1.0), &[2, 1, 5])).unwrap();
+    m
+}
+
+fn bits_of(m: &VarMap) -> Vec<Vec<f32>> {
+    m.tensors().iter().map(|t| t.to_vec()).collect()
+}
+
+#[track_caller]
+fn assert_map_bits(what: &str, a: &VarMap, b: &VarMap) {
+    assert_eq!(a.names(), b.names(), "{what}: names");
+    for ((n, x), y) in a.names().iter().zip(bits_of(a)).zip(bits_of(b)) {
+        assert_bits(&format!("{what}: {n}"), &x, &y);
+    }
+}
+
+/// Initialisation copies the online vars (untracked even from a lifted map); τ = 1 keeps θ′ and
+/// τ = 0 copies θ, to the bit; a scheduled update is τ·θ′ + (1 − τ)·θ in f32, to the bit.
+#[test]
+fn target_ema_copy_init_and_tau_endpoints() {
+    let a = online(1);
+    let b = online(10);
+    let ema = TargetEma::new(&a.lifted(), TauSchedule::cosine(100));
+    assert_eq!(ema.step(), 0);
+    assert_map_bits("copy initialisation", &ema.target(), &a);
+    assert!(ema.target().tensors().iter().all(|t| !t.is_tracked() && !t.is_require_grad()));
+    let mut e1 = TargetEma::new(&a, TauSchedule::Constant(1.0));
+    e1.update(&b.lifted());
+    assert_map_bits("τ = 1", &e1.target(), &a);
+    let mut e0 = TargetEma::new(&a, TauSchedule::Constant(0.0));
+    e0.update(&b);
+    assert_map_bits("τ = 0", &e0.target(), &b);
+    assert_eq!((e0.step(), e1.step()), (1, 1));
+    // Scheduled updates against host f32 arithmetic.
+    let mut e = TargetEma::new(&a, TauSchedule::cosine(10));
+    let mut host = bits_of(&a);
+    for k in 0..12u64 {
+        let on = online(20 + k);
+        let tau = e.update(&on);
+        assert_eq!(tau.to_bits(), TauSchedule::cosine(10).tau(k).to_bits());
+        let (t32_, u32_) = (tau as f32, (1.0 - tau) as f32);
+        for (h, x) in host.iter_mut().zip(bits_of(&on)) {
+            for (hv, xv) in h.iter_mut().zip(x) {
+                *hv = *hv * t32_ + xv * u32_;
+            }
+        }
+        for ((n, got), want) in e.target().names().iter().zip(bits_of(&e.target())).zip(&host) {
+            assert_bits(&format!("step {k}: {n}"), &got, want);
+        }
+    }
+    assert_eq!(e.step(), 12);
+}
+
+/// The cosine schedule is exact at the start (0.996), the middle (0.998) and the end (1), and
+/// holds 1 after the end; τ never decreases.
+#[test]
+fn target_ema_cosine_schedule() {
+    let s = TauSchedule::cosine(1000);
+    assert_eq!(s.tau(0), 0.996);
+    assert!((s.tau(500) - 0.998).abs() <= 1e-15, "middle {}", s.tau(500));
+    assert_eq!(s.tau(1000), 1.0);
+    assert_eq!(s.tau(5000), 1.0);
+    let quarter = 1.0 - 0.004 * ((std::f64::consts::PI / 4.0).cos() + 1.0) / 2.0;
+    assert!((s.tau(250) - quarter).abs() <= 1e-15);
+    assert!((0..=1000).all(|k| s.tau(k + 1) >= s.tau(k)));
+    let odd = TauSchedule::Cosine { start: 0.9, end: 0.99, steps: 7 };
+    assert_eq!((odd.tau(0), odd.tau(7)), (0.9, 0.99));
+    assert_eq!(TauSchedule::Constant(0.5).tau(123), 0.5);
+}
+
+/// The target receives no gradient: a loss through both the target and the online vars gives
+/// gradients to the online vars only, equal to the loss with the target as constants.
+#[test]
+fn target_ema_never_receives_gradients() {
+    let a = online(2);
+    let mut ema = TargetEma::new(&a, TauSchedule::cosine(5));
+    ema.update(&online(3));
+    let lifted = online(4).lifted();
+    let tgt = ema.target();
+    let x = t32(rnd(2 * 2 * 3, 5, -1.0, 1.0), &[2, 2, 3]);
+    let f = |m: &VarMap| x.clone().matmul(m.var("a.w").clone());
+    let loss = mse(f(&lifted), &f(&tgt)) + mse(f(&tgt), &f(&lifted));
+    let g = loss.sum().backward();
+    assert!(tgt.tensors().iter().all(|t| t.grad(&g).is_none()), "the target got a gradient");
+    let ga = lifted.var("a.w").grad(&g).unwrap().to_vec();
+    // The same loss with θ′ as fresh constants.
+    let consts: Vec<Tensor> = tgt.tensors().iter().map(|t| Tensor::from_data(t.to_vec(), t.shape().to_vec())).collect();
+    let lifted2 = online(4).lifted();
+    let yc = x.clone().matmul(consts[0].clone());
+    let grads_c = (mse(f(&lifted2), &yc) + mse(yc.clone(), &f(&lifted2))).sum().backward();
+    assert_bits("online gradient", &ga, &lifted2.var("a.w").grad(&grads_c).unwrap().to_vec());
+    // stop_gradient cuts a tracked value.
+    let z = stop_gradient(&f(&lifted));
+    assert!(!z.is_tracked());
+}
+
+/// Save and restore keep θ′, the step count and the schedule exactly; the restored EMA continues
+/// as the original.
+#[test]
+fn target_ema_save_restore() {
+    let mut e = TargetEma::new(&online(6), TauSchedule::Cosine { start: 0.99, end: 1.0, steps: 13 });
+    for k in 0..7 {
+        e.update(&online(30 + k));
+    }
+    let text = e.to_json().unwrap();
+    let mut r = TargetEma::from_json(&text).unwrap();
+    assert_eq!(r.step(), 7);
+    assert_eq!(r.schedule, e.schedule);
+    assert_eq!(r.tau().to_bits(), e.tau().to_bits());
+    assert_map_bits("restored θ′", &r.target(), &e.target());
+    for k in 0..8 {
+        let on = online(50 + k);
+        assert_eq!(e.update(&on).to_bits(), r.update(&on).to_bits());
+    }
+    assert_map_bits("after 8 more updates", &r.target(), &e.target());
+    assert_eq!(r.to_json().unwrap(), e.to_json().unwrap());
+    let c = TargetEma::from_json(&TargetEma::new(&online(6), TauSchedule::Constant(0.75)).to_json().unwrap()).unwrap();
+    assert_eq!(c.schedule, TauSchedule::Constant(0.75));
+    assert!(TargetEma::from_json(&text.replace("nn.target_ema.v1", "other")).is_err());
+}

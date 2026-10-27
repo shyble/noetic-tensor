@@ -139,8 +139,84 @@ fn body_set_attention_on_the_device() {
     println!("{TAG} set attention: within tolerance of CpuRef, pads zero-gradient, padded/unpadded {worst:.1e}, permuted {e:.1e}, byte-identical run to run");
 }
 
+// ------------------------------------------------------------------------------ TargetEma
+
+fn online_map(root: u64) -> VarMap {
+    let mut m = VarMap::new();
+    m.insert("a.w", t32(&rnd(2 * 6 * 4, root, -1.0, 1.0), &[2, 6, 4])).unwrap();
+    m.insert("b.w", t32(&rnd(2 * 9, root + 1, -1.0, 1.0), &[2, 1, 9])).unwrap();
+    m
+}
+
+fn host(m: &VarMap) -> Vec<f32> {
+    m.tensors().iter().flat_map(|t| t.to_vec()).collect()
+}
+
+/// Copy initialisation, τ endpoints, 20 scheduled updates, detached reads and save/restore on
+/// the device.
+fn ema_run(device: Device) -> (Vec<Vec<f32>>, String) {
+    nt::set_default_device(device).unwrap();
+    let a = vars_on(&online_map(1), device);
+    let mut e = TargetEma::new(&a.lifted(), TauSchedule::cosine(16));
+    assert!(e.target().tensors().iter().all(|t| t.device() == device && !t.is_tracked()));
+    let mut out = vec![host(&e.target())];
+    for k in 0..20u64 {
+        e.update(&vars_on(&online_map(100 + k), device).lifted());
+        out.push(host(&e.target()));
+    }
+    let json = e.to_json().unwrap();
+    nt::set_default_device(R).unwrap();
+    (out, json)
+}
+
+#[test]
+#[ignore = "run by its wrapper in a fresh process"]
+fn body_target_ema_on_the_device() {
+    let (cpu, cpu_json) = ema_run(R);
+    let (dev, dev_json) = ema_run(M);
+    assert_bits(&format!("{TAG} copy initialisation"), &dev[0], &cpu[0]);
+    let worst = dev.iter().zip(&cpu).map(|(a, c)| rel(a, c)).fold(0.0, f64::max);
+    assert!(worst <= 1e-6, "{TAG} target EMA: {worst:e} from CpuRef");
+    let bit_equal = dev.iter().zip(&cpu).all(|(a, c)| a.iter().zip(c).all(|(x, y)| x.to_bits() == y.to_bits()));
+    let (again, again_json) = ema_run(M);
+    for (i, (a, c)) in dev.iter().zip(&again).enumerate() {
+        assert_bits(&format!("{TAG} target EMA run-to-run {i}"), a, c);
+    }
+    assert_eq!(dev_json, again_json, "{TAG}: saved state differs run to run");
+    let _ = cpu_json;
+    nt::set_default_device(M).unwrap();
+    // τ = 1 and τ = 0, exactly.
+    let a = vars_on(&online_map(2), M);
+    let b = vars_on(&online_map(3), M);
+    let mut e1 = TargetEma::new(&a, TauSchedule::Constant(1.0));
+    e1.update(&b);
+    assert_bits(&format!("{TAG} τ = 1"), &host(&e1.target()), &host(&a));
+    let mut e0 = TargetEma::new(&a, TauSchedule::Constant(0.0));
+    e0.update(&b);
+    assert_bits(&format!("{TAG} τ = 0"), &host(&e0.target()), &host(&b));
+    // No gradient reaches the target.
+    let lifted = b.lifted();
+    let tgt = e1.target();
+    let x = t32(&rnd(2 * 3 * 6, 4, -1.0, 1.0), &[2, 3, 6]);
+    let g = mse(x.clone().matmul(lifted.var("a.w").clone()), &x.clone().matmul(tgt.var("a.w").clone())).sum().backward();
+    assert!(tgt.tensors().iter().all(|t| t.grad(&g).is_none()) && lifted.var("a.w").grad(&g).is_some());
+    // Restore on the device and continue: as the original.
+    let mut r = TargetEma::from_json(&dev_json).unwrap();
+    assert_eq!(r.step(), 20);
+    let mut o = TargetEma::from_json(&dev_json).unwrap();
+    for k in 0..3 {
+        let on = vars_on(&online_map(200 + k), M);
+        r.update(&on);
+        o.update(&on);
+    }
+    assert_eq!(r.to_json().unwrap(), o.to_json().unwrap());
+    assert!(r.target().tensors().iter().all(|t| t.device() == M));
+    nt::set_default_device(R).unwrap();
+    println!("{TAG} target EMA: 20 scheduled updates within {worst:.1e} of CpuRef (bit-equal: {bit_equal}), τ = 1 and τ = 0 exact, no target gradient, restore exact, byte-identical run to run");
+}
+
 /// The joint-embedding bodies, in a fresh process.
 #[test]
 fn joint_embed_ops_on_the_device() {
-    crate::tensor::tests::isolated_bodies(&here!("body_"), 1);
+    crate::tensor::tests::isolated_bodies(&here!("body_"), 2);
 }
