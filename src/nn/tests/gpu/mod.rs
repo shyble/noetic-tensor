@@ -50,4 +50,7 @@ mod cuda {
     mod joint_embed {
         include!("joint_embed.rs");
     }
+    mod bce_l2 {
+        include!("bce_l2.rs");
+    }
 }

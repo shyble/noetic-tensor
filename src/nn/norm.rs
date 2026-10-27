@@ -52,7 +52,9 @@ pub fn rms_normalize(xs: &Tensor, eps: f64) -> Tensor {
     xs.clone() * inv
 }
 
-/// `l2_normalize`'s usual ε.
+/// `l2_normalize`'s usual ε. A row whose norm is below ε gets the upstream gradient times 1/ε,
+/// 1e12 at this ε: a zero row next to a large upstream gradient can dominate a gradient norm or
+/// overflow F16. Pass a larger ε (1e-6, say) where such rows are expected.
 pub const L2_EPS: f64 = 1e-12;
 
 /// `x / max(‖x‖, ε)` along `dim` (the Euclidean norm over that axis). The denominator is computed

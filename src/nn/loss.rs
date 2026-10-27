@@ -142,6 +142,7 @@ pub fn binary_cross_entropy_with_logits(logits: Tensor, targets: &Tensor, weight
                 p.reshape_dyn(sh)
             } else {
                 assert_eq!(p.rank(), r, "BCE with logits: pos_weight rank");
+                assert!(p.shape().iter().zip(logits.shape()).all(|(a, b)| a == b || *a == 1), "BCE with logits: pos_weight {:?} does not broadcast to the logits {:?} without expanding them", p.shape(), logits.shape());
                 p
             };
             let lw = (p.sub_scalar(1.0) * y.clone()).add_scalar(1.0); // 1 + (p − 1)·y
@@ -152,6 +153,7 @@ pub fn binary_cross_entropy_with_logits(logits: Tensor, targets: &Tensor, weight
     let loss = match weights.and_then(|w| w.weight.clone()) {
         Some(w) => {
             assert_eq!(w.rank(), r, "BCE with logits: weight rank");
+            assert!(w.shape().iter().zip(loss.shape()).all(|(a, b)| a == b || *a == 1), "BCE with logits: weight {:?} does not broadcast to the logits {:?} without expanding them", w.shape(), loss.shape());
             loss * w
         }
         None => loss,

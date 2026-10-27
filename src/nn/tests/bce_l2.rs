@@ -105,6 +105,23 @@ fn bce_with_logits_matches_f64_reference() {
     assert_eq!(pf, c.run(false, true, Reduction::None, DType::F64));
 }
 
+/// A weight or pos_weight that would expand the logits' shape is refused.
+#[test]
+#[should_panic(expected = "without expanding them")]
+fn bce_with_logits_refuses_an_expanding_weight() {
+    let x = t32(vec![0.5; 4], &[1, 1, 4]);
+    let w = BceWeights { weight: Some(t32(vec![1.0; 8], &[2, 1, 4])), pos_weight: None };
+    let _ = binary_cross_entropy_with_logits(x.clone(), &x, Some(&w), Reduction::None);
+}
+
+#[test]
+#[should_panic(expected = "without expanding them")]
+fn bce_with_logits_refuses_an_expanding_pos_weight() {
+    let x = t32(vec![0.5; 4], &[1, 1, 4]);
+    let w = BceWeights { weight: None, pos_weight: Some(t32(vec![1.0; 8], &[1, 2, 4])) };
+    let _ = binary_cross_entropy_with_logits(x.clone(), &x, Some(&w), Reduction::None);
+}
+
 /// f64 central differences of the logits' and the targets' gradients, every option, at every
 /// element (x = 0 included, where the gradient is 1/2 − y).
 #[test]
