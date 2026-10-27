@@ -169,7 +169,7 @@ fn set_attention_masked_positions_get_zero_gradient() {
             assert!(gr.iter().any(|v| *v != 0.0), "real row {row} has no gradient");
         }
     }
-    assert_eq!(zeros, s * (10 - 2 + 10 - 6 + 0 + 10 - 4));
+    assert_eq!(zeros, s * (8 + 4 + 6)); // sizes 2, 6, 10, 4 of 10
     let (gx2, gv2, _) = run(-7.0);
     assert_bits("input gradients, other pad values", &gx, &gx2);
     for (i, (a, b)) in gv.iter().zip(&gv2).enumerate() {
@@ -489,7 +489,7 @@ fn vicreg_variance_zero_above_one() {
 /// the 8×8 Hadamard matrix (whose std 1.07 also leaves the variance hinge at 0).
 #[test]
 fn vicreg_covariance_zero_on_whitened_input() {
-    let h = |i: usize, j: usize| if (i & j).count_ones() % 2 == 0 { 1.0 } else { -1.0 };
+    let h = |i: usize, j: usize| if (i & j).count_ones().is_multiple_of(2) { 1.0 } else { -1.0 };
     let (n, d) = (8, 4);
     let z: Vec<f64> = (0..n).flat_map(|i| (1..=d).map(move |j| h(i, j))).collect();
     let z2: Vec<f64> = z.iter().chain(&z).map(|v| v * 1.5).collect(); // a second seed, scaled
@@ -640,4 +640,198 @@ fn group_info_nce_masked_entries_get_zero_gradient() {
         }
     }
     fd_input("group InfoNCE", &x, &[s, g, k], &|xt| masked_group_info_nce(xt, &targets, &valid_t, Some(&keep_t(DType::F64))), 1e-6, 1e-7);
+}
+
+// ---------------------------------------------------------------------- effective rank
+
+/// A random orthonormal `d × k` basis (Gram–Schmidt on uniform columns), column-major per column.
+fn orthonormal(d: usize, k: usize, seed: u64) -> Vec<Vec<f64>> {
+    let mut cols: Vec<Vec<f64>> = Vec::new();
+    for j in 0..k {
+        let mut v = rnd(d, seed + j as u64, -1.0, 1.0);
+        for _ in 0..2 {
+            for c in &cols {
+                let dot: f64 = v.iter().zip(c).map(|(a, b)| a * b).sum();
+                v.iter_mut().zip(c).for_each(|(a, b)| *a -= dot * b);
+            }
+        }
+        let norm = v.iter().map(|a| a * a).sum::<f64>().sqrt();
+        cols.push(v.into_iter().map(|a| a / norm).collect());
+    }
+    cols
+}
+
+/// `Q · diag(λ) · Qᵀ` for the orthonormal columns `q`.
+fn from_spectrum(q: &[Vec<f64>], ev: &[f64], d: usize) -> Vec<f64> {
+    (0..d * d).map(|i| q.iter().zip(ev).map(|(c, l)| l * c[i / d] * c[i % d]).sum()).collect()
+}
+
+/// The identity (and its multiples) in d dimensions has effective rank d.
+#[test]
+fn effective_rank_of_identity_is_d() {
+    for d in [1, 2, 7, 16, 64] {
+        for scale in [1.0, 0.01, 250.0] {
+            let eye: Vec<f64> = (0..d * d).map(|i| if i / d == i % d { scale } else { 0.0 }).collect();
+            let r = effective_rank_of_covariance(&eye, d);
+            assert!((r - d as f64).abs() <= 1e-12 * d as f64, "d {d} scale {scale}: {r}");
+        }
+    }
+}
+
+/// Jacobi recovers a known spectrum under a random rotation; a constructed rank-k matrix (k
+/// equal eigenvalues) gives effective rank k; unequal ones give less; zero gives 0.
+#[test]
+fn effective_rank_of_rank_k_is_k() {
+    let d = 24;
+    let full = orthonormal(d, d, 600);
+    let spectrum: Vec<f64> = (0..d).map(|i| 10.0 / (1.0 + i as f64)).collect();
+    let ev = jacobi_eigenvalues(&from_spectrum(&full, &spectrum, d), d);
+    assert_close("recovered spectrum", &ev, &spectrum, 1e-10);
+    for k in [1, 3, 8, 24] {
+        let q = orthonormal(d, k, 700 + k as u64);
+        let c = from_spectrum(&q, &vec![2.5; k], d);
+        let r = effective_rank_of_covariance(&c, d);
+        assert!((r - k as f64).abs() <= 1e-9, "rank {k}: effective rank {r}");
+        let ev = jacobi_eigenvalues(&c, d);
+        assert!(ev[k..].iter().all(|x| x.abs() <= 1e-12), "rank {k}: tail {:?}", &ev[k..]);
+    }
+    let q = orthonormal(d, 4, 800);
+    let r = effective_rank_of_covariance(&from_spectrum(&q, &[4.0, 2.0, 1.0, 0.5], d), d);
+    assert!(r > 3.0 && r < 4.0, "unequal rank 4: {r}");
+    assert_eq!(effective_rank_of_covariance(&vec![0.0; d * d], d), 0.0);
+}
+
+/// From embeddings: rows on a k-dimensional subspace give about k (at most k); the per-seed
+/// statistics read a tensor outside autograd; two calls give the same bits.
+#[test]
+fn effective_rank_of_embeddings() {
+    let (n, d, k) = (400, 24, 4);
+    let q = orthonormal(d, k, 900);
+    // Seed 0: rows x·Qᵀ with x uniform in k dimensions (equal variances); seed 1: isotropic.
+    let x = rnd(n * k, 901, -1.0, 1.0);
+    let mut z: Vec<f64> = (0..n).flat_map(|i| { let x = &x; let q = &q; (0..d).map(move |j| (0..k).map(|c| x[i * k + c] * q[c][j]).sum::<f64>()) }).collect();
+    z.extend(rnd(n * d, 902, -1.0, 1.0));
+    let zt = t32(z.clone(), &[2, n, d]).require_grad();
+    let st = embedding_stats(&zt);
+    assert!(st[0].effective_rank <= k as f64 + 1e-3 && st[0].effective_rank > k as f64 - 0.5, "subspace: {}", st[0].effective_rank);
+    assert!(st[1].effective_rank > 0.9 * d as f64, "isotropic: {}", st[1].effective_rank);
+    assert!(st[1].std.iter().all(|s| (s - (1.0f64 / 3.0).sqrt()).abs() < 0.06), "isotropic std {:?}", st[1].std);
+    assert_eq!(st[0].eigenvalues.len(), d);
+    let again = effective_rank(&zt);
+    assert_eq!(again.iter().map(|x| x.to_bits()).collect::<Vec<_>>(), st.iter().map(|x| x.effective_rank.to_bits()).collect::<Vec<_>>());
+    // f64 input matches the host covariance path.
+    let rank_f64 = effective_rank(&t64(z[..n * d].to_vec(), &[1, n, d]))[0];
+    assert_eq!(rank_f64.to_bits(), effective_rank_of_covariance(&covariance(&z[..n * d], n, d), d).to_bits());
+}
+
+// ------------------------------------------------------------- state hash of a joint-embedding run
+
+/// A small joint-embedding run on `device` from root `root`: a non-causal set encoder with the key
+/// padding mask, the masked mean pool, a projector and a predictor (S = 2 seeds); the target
+/// branch through a `TargetEma` of the encoder and projector (cosine τ); VICReg between the
+/// prediction and the target embedding plus masked group InfoNCE over variable-size candidate
+/// groups; 6 Adam steps, each followed by an EMA update; the effective rank of the embeddings at
+/// every step. Returns the sha256 of everything (losses, ranks, online vars, Adam moments, the
+/// saved target EMA) and the per-step losses.
+pub(crate) fn joint_embed_run(device: crate::tensor::Device, root: u64) -> (String, Vec<f32>) {
+    use crate::nn::Optimizer;
+    use rand::Rng;
+    let (s, b, t, d, h, e) = (2, 8, 10, 16, 4, 8);
+    crate::tensor::set_default_device(device).unwrap();
+    let map = RefCell::new(VarMap::new());
+    {
+        let vb = VarBuilder::init(&map, s, root);
+        attention(AttentionConfig::non_causal(d, h), &vb.pp("enc")).unwrap();
+        linear(d, e, "proj", &vb).unwrap();
+        linear(e, e, "pred", &vb).unwrap();
+    }
+    let mut vars = VarMap::new();
+    for (n, x) in map.into_inner().iter() {
+        vars.insert(n, x.clone().to(device)).unwrap();
+    }
+    let target_names = |m: &VarMap| -> VarMap {
+        let mut o = VarMap::new();
+        for (n, x) in m.iter().filter(|(n, _)| !n.starts_with("pred")) {
+            o.insert(n, x.clone()).unwrap();
+        }
+        o
+    };
+    let mut ema = TargetEma::new(&target_names(&vars), TauSchedule::cosine(6));
+    let mut opt = Adam::new(AdamConfig::default(), ParamGroups::new(&vars), &vars);
+    let embed = |m: &VarMap, x: &Tensor, pad: &BoolTensor| -> Tensor {
+        let vb = VarBuilder::from_varmap(m);
+        let enc = attention(AttentionConfig::non_causal(d, h), &vb.pp("enc")).unwrap();
+        let proj = linear(d, e, "proj", &vb).unwrap();
+        proj.forward(&masked_mean_pool(&enc.forward_with(x, t, Some(pad)), t, Some(pad)))
+    };
+    let mut r = rng(root + 1);
+    let mut record = String::new();
+    let mut losses = Vec::new();
+    for step in 0..6u64 {
+        // Two views of B sets of 2..=10 examples: the second permuted (reversed) and jittered.
+        let sizes: Vec<usize> = (0..b).map(|_| r.gen_range(2..=t)).collect();
+        let mut xa = vec![0.0; s * b * t * d];
+        let mut xb = vec![0.0; s * b * t * d];
+        let mut pad = vec![true; s * b * t];
+        for k in 0..s {
+            for (i, &n) in sizes.iter().enumerate() {
+                for j in 0..n {
+                    let row = (k * b + i) * t + j;
+                    let rev = (k * b + i) * t + (n - 1 - j);
+                    pad[row] = false;
+                    for c in 0..d {
+                        let v: f64 = r.gen_range(-1.0..1.0);
+                        xa[row * d + c] = v;
+                        xb[rev * d + c] = v + r.gen_range(-0.05..0.05);
+                    }
+                }
+            }
+        }
+        let pad = BoolTensor::from_data(pad, [s, b, t]);
+        let (xa, xb) = (t32(xa, &[s, b * t, d]), t32(xb, &[s, b * t, d]));
+        // Candidate groups: row i scores the B target embeddings, some of them masked (never i).
+        let valid: Vec<bool> = (0..s * b * b).map(|q| { let (i, j) = ((q / b) % b, q % b); i == j || !(i + 2 * j + step as usize).is_multiple_of(3) }).collect();
+        let valid = BoolTensor::from_data(valid, [s, b, b]);
+        let targets = IntTensor::from_data((0..s * b).map(|q| (q % b) as i64).collect(), [s, b]);
+        let lifted = vars.lifted();
+        let za = {
+            let vb = VarBuilder::from_varmap(&lifted);
+            linear(e, e, "pred", &vb).unwrap().forward(&embed(&lifted, &xa, &pad))
+        };
+        let zt = embed(&ema.target(), &xb, &pad);
+        assert!(!zt.is_tracked(), "the target branch is tracked");
+        let v = vicreg(za.clone(), zt.clone(), VicregWeights::default());
+        let logits = za.clone().matmul(zt.clone().swap_dims(1, 2)).div_scalar(0.1);
+        let nce = masked_group_info_nce(logits, &targets, &valid, None);
+        let loss = v.loss.clone() + nce.clone();
+        let ranks = effective_rank(&za);
+        let g = loss.clone().sum().backward();
+        opt.step(&mut vars, lifted.grads(&g), 1.0);
+        let tau = ema.update(&target_names(&vars));
+        losses.extend(loss.to_vec());
+        record.push_str(&format!("step {step} tau {:016x} loss {:?} vic {:?} nce {:?} ranks {:?}\n", tau.to_bits(), loss.to_vec().iter().map(|x| x.to_bits()).collect::<Vec<_>>(), v.loss.to_vec().iter().map(|x| x.to_bits()).collect::<Vec<_>>(), nce.to_vec().iter().map(|x| x.to_bits()).collect::<Vec<_>>(), ranks.iter().map(|x| x.to_bits()).collect::<Vec<_>>()));
+    }
+    record.push_str(&vars.to_json().unwrap());
+    let (m, vv, steps) = opt.state();
+    record.push_str(&format!("adam {steps}"));
+    for x in m.iter().chain(vv) {
+        record.push_str(&format!("{:?}", x.to_vec().iter().map(|x| x.to_bits()).collect::<Vec<_>>()));
+    }
+    record.push_str(&ema.to_json().unwrap());
+    crate::tensor::set_default_device(crate::tensor::Device::Cpu(crate::tensor::CpuMode::Reference)).unwrap();
+    (crate::hash::sha256_hex(record.as_bytes()), losses)
+}
+
+/// The joint-embedding run gives the same state hash twice for the same seed on CpuRef, another for
+/// another seed.
+#[test]
+fn joint_embed_run_state_hash_is_reproducible() {
+    let dev = crate::tensor::Device::Cpu(crate::tensor::CpuMode::Reference);
+    let (h1, l1) = joint_embed_run(dev, 5);
+    let (h2, l2) = joint_embed_run(dev, 5);
+    assert_eq!(h1, h2, "state hash differs run to run");
+    assert_bits("losses", &l1, &l2);
+    assert_ne!(joint_embed_run(dev, 6).0, h1);
+    assert!(l1.iter().all(|x| x.is_finite()));
+    println!("cpu-ref joint-embedding run state hash {h1}");
 }

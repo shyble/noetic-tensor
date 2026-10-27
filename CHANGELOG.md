@@ -1,5 +1,15 @@
 # Changes
 
+## Unreleased (branch je-ops)
+
+Additions for joint-embedding training (not yet released; no version bump). Each is tested on the CPU reference backend against f64 host references and finite differences, and on Metal against CpuRef (CUDA: see below), byte-identical run to run; a small joint-embedding run (set encoder, target EMA, VICReg, group InfoNCE, rank monitor, Adam) gives the same state hash twice for the same seed on each backend.
+
+- **Set attention.** `AttentionConfig::non_causal` and `masked_mean_pool` over the existing key padding mask: a set of 2–10 examples padded to a common length equals its unpadded self at the real positions within fp32 1e-6 (not to the bit: the reductions group their sums by length), padded positions get exactly zero gradient, and the pooled output is invariant to the examples' order within 1e-6.
+- **`TargetEma`** (`nn::target_ema`): the target vars as a copy of the online vars, `θ′ ← τθ′ + (1−τ)θ` with `TauSchedule` (cosine 0.996 → 1 by default, endpoints exact), no bias correction, detached reads, save and restore of θ′, the step and the schedule. `nn::ema::Ema` is unchanged.
+- **VICReg** (`vicreg`, `vicreg_variance`, `vicreg_covariance`, `VicregWeights`, default 25/25/1, γ 1, ε 1e-4), per seed, with the reference implementation's grouping (variance hinges averaged, covariance terms summed).
+- **Masked group InfoNCE** (`masked_group_info_nce`): variable-size candidate groups padded to K with a masked log-softmax and an optional group mask; `cross_entropy` to the bit on full groups.
+- **Effective-rank monitor** (`nn::rank`): host-side f64 covariance, cyclic Jacobi eigenvalues and the Roy–Vetterli effective rank, outside autograd, with per-dimension standard deviations.
+
 ## 0.6.1
 
 Released 16 October 2026. Documentation only; no code changed. The 0.6.0 release's deterministic mode, with every 0.6.0 option off, was tested on two GPUs in one machine and on two machines:

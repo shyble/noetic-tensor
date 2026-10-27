@@ -258,7 +258,7 @@ fn body_vicreg_on_the_device() {
     assert!(v.to_vec().iter().all(|x| *x == 0.0));
     assert!(big.grad(&v.sum().backward()).unwrap().to_vec().iter().all(|x| *x == 0.0));
     // Whitened (Hadamard columns): covariance exactly 0.
-    let h = |i: usize, j: usize| if (i & j).count_ones() % 2 == 0 { 1.5 } else { -1.5 };
+    let h = |i: usize, j: usize| if (i & j).count_ones().is_multiple_of(2) { 1.5 } else { -1.5 };
     let wz: Vec<f64> = (0..8).flat_map(|i| (1..=4).map(move |j| h(i, j))).collect();
     assert_eq!(vicreg_covariance(&t32(&wz, &[1, 8, 4])).to_vec(), vec![0.0]);
     // Constant: the hinge 0.99.
@@ -331,8 +331,49 @@ fn body_group_info_nce_on_the_device() {
     println!("{TAG} group InfoNCE: loss within {e0:.1e} and gradient within {e1:.1e} of CpuRef, masked entries zero-gradient, pads' values irrelevant, equal to cross_entropy on full groups, byte-identical run to run");
 }
 
+// ---------------------------------------------------------- effective rank and state hash
+
+#[test]
+#[ignore = "run by its wrapper in a fresh process"]
+fn body_effective_rank_on_the_device() {
+    let (s, n, d) = (2, 64, 12);
+    let mut z = rnd(s * n * d, 500, -1.0, 1.0);
+    // Seed 1 on a 3-dimensional subspace: rows repeat columns 0..3 with fixed mixes.
+    for i in 0..n {
+        let row = (n + i) * d;
+        let base: Vec<f64> = z[row..row + 3].to_vec();
+        for j in 3..d {
+            z[row + j] = base[j % 3] * (1.0 + 0.1 * j as f64);
+        }
+    }
+    let cpu = embedding_stats(&t32(&z, &[s, n, d]));
+    nt::set_default_device(M).unwrap();
+    let zt = t32(&z, &[s, n, d]).require_grad();
+    assert_eq!(zt.device(), M);
+    let dev = embedding_stats(&zt);
+    nt::set_default_device(R).unwrap();
+    assert_eq!(cpu, dev, "{TAG}: the monitor reads other values than on CpuRef");
+    assert!(dev[1].effective_rank <= 3.0 + 1e-6 && dev[0].effective_rank > 0.8 * d as f64);
+    println!("{TAG} effective rank: {:.4} (isotropic, d {d}) and {:.4} (rank 3), equal to CpuRef", dev[0].effective_rank, dev[1].effective_rank);
+}
+
+#[test]
+#[ignore = "run by its wrapper in a fresh process"]
+fn body_joint_embed_run_state_hash() {
+    let (h1, l1) = crate::nn::tests::joint_embed::joint_embed_run(M, 5);
+    let (h2, l2) = crate::nn::tests::joint_embed::joint_embed_run(M, 5);
+    assert_eq!(h1, h2, "{TAG}: joint-embedding run state hash differs run to run");
+    assert_bits(&format!("{TAG} joint-embedding run losses"), &l1, &l2);
+    let (_, lc) = crate::nn::tests::joint_embed::joint_embed_run(R, 5);
+    let first = rel(&l1[..2], &lc[..2]);
+    assert!(first <= 1e-5, "{TAG}: first-step loss {first:e} from CpuRef");
+    let all = rel(&l1, &lc);
+    assert!(all <= 1e-3, "{TAG}: 6-step losses {all:e} from CpuRef");
+    println!("{TAG} joint-embedding run: state hash {h1} twice; first-step loss within {first:.1e}, 6 steps within {all:.1e} of CpuRef");
+}
+
 /// The joint-embedding bodies, in a fresh process.
 #[test]
 fn joint_embed_ops_on_the_device() {
-    crate::tensor::tests::isolated_bodies(&here!("body_"), 4);
+    crate::tensor::tests::isolated_bodies(&here!("body_"), 6);
 }
