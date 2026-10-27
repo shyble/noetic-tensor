@@ -520,3 +520,124 @@ fn vicreg_constant_input_hinge() {
         assert_close(&format!("{dtype:?} loss"), &v.loss.to_vec_f64(), &[24.75, 24.75], tol);
     }
 }
+
+// ------------------------------------------------------------------ masked group InfoNCE
+
+/// Groups of variable size: per (seed, group) a size in 2..=kmax and a positive index below it.
+fn groups(s: usize, g: usize, kmax: usize, seed: u64) -> (Vec<usize>, Vec<i64>) {
+    use rand::Rng;
+    let mut r = rng(seed);
+    let sizes: Vec<usize> = (0..s * g).map(|_| r.gen_range(2..=kmax)).collect();
+    let targets = sizes.iter().map(|&n| r.gen_range(0..n) as i64).collect();
+    (sizes, targets)
+}
+
+/// The padded logits `[S, G, K]` (pads hold `fill`-scaled garbage), from per-group values.
+fn padded_logits(vals: &[Vec<f64>], k: usize, fill: f64) -> (Vec<f64>, Vec<bool>) {
+    let mut x = rnd(vals.len() * k, 555, -1.0, 1.0).into_iter().map(|v| v * fill).collect::<Vec<_>>();
+    let mut valid = vec![false; vals.len() * k];
+    for (i, v) in vals.iter().enumerate() {
+        x[i * k..i * k + v.len()].copy_from_slice(v);
+        valid[i * k..i * k + v.len()].iter_mut().for_each(|b| *b = true);
+    }
+    (x, valid)
+}
+
+/// The f64 reference: per seed, the mean over groups of −log softmax(group)[target].
+fn info_nce_ref(vals: &[Vec<f64>], targets: &[i64], s: usize) -> Vec<f64> {
+    let g = vals.len() / s;
+    (0..s).map(|k| {
+        (0..g).map(|j| {
+            let v = &vals[k * g + j];
+            let m = v.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+            let lse = m + v.iter().map(|x| (x - m).exp()).sum::<f64>().ln();
+            lse - v[targets[k * g + j] as usize]
+        }).sum::<f64>() / g as f64
+    }).collect()
+}
+
+/// With every group full (equal sizes, all valid, no group mask) it is `cross_entropy` on
+/// `[S, G, 1, K]`, to the bit, and so are its gradients.
+#[test]
+fn group_info_nce_equals_cross_entropy_on_equal_groups() {
+    let (s, g, k) = (3, 7, 5);
+    let x = rnd(s * g * k, 160, -3.0, 3.0);
+    let tg = rnd_ints(s * g, 161, k as i64);
+    let targets = IntTensor::from_data(tg.clone(), [s, g]);
+    let valid = BoolTensor::from_data(vec![true; s * g * k], [s, g, k]);
+    let a = t32(x.clone(), &[s, g, k]).require_grad();
+    let la = masked_group_info_nce(a.clone(), &targets, &valid, None);
+    let b = t32(x, &[s, g, k]).require_grad();
+    let lb = cross_entropy(b.clone().reshape([s, g, 1, k]), &IntTensor::from_data(tg, [s, g, 1]));
+    assert_bits("loss", &la.to_vec(), &lb.to_vec());
+    let (ga, gb) = (a.grad(&la.sum().backward()).unwrap().to_vec(), b.grad(&lb.sum().backward()).unwrap().to_vec());
+    assert_bits("gradient", &ga, &gb);
+}
+
+/// Padding changes nothing: variable-size groups padded to K = 9 equal the f64 reference of the
+/// unpadded groups (f64 to 1e-12, f32 to 1e-6), whatever the pads hold (to the bit), and adding
+/// whole groups dropped by the group mask leaves the result unchanged.
+#[test]
+fn group_info_nce_padding_does_not_change_the_result() {
+    let (s, g, kmax, k) = (2, 6, 7, 9);
+    let (sizes, tg) = groups(s, g, kmax, 170);
+    let vals: Vec<Vec<f64>> = sizes.iter().enumerate().map(|(i, &n)| rnd(n, 171 + i as u64, -4.0, 4.0)).collect();
+    let want = info_nce_ref(&vals, &tg, s);
+    let targets = IntTensor::from_data(tg.clone(), [s, g]);
+    for (dtype, tol) in [(DType::F64, 1e-12), (DType::F32, 1e-6)] {
+        let run = |fill: f64| -> Vec<f64> {
+            let (x, valid) = padded_logits(&vals, k, fill);
+            masked_group_info_nce(Tensor::from_f64s(x, [s, g, k], dtype), &targets, &BoolTensor::from_data(valid, [s, g, k]), None).to_vec_f64()
+        };
+        let got = run(1.0);
+        assert_close(&format!("{dtype:?} padded vs reference"), &got, &want, tol);
+        assert_eq!(got, run(1e6), "{dtype:?}: the pads' values changed the loss");
+        // Two extra groups per seed, dropped by the group mask (and holding garbage).
+        let mut v2 = Vec::new();
+        let mut t2 = Vec::new();
+        let mut keep = Vec::new();
+        for kk in 0..s {
+            for j in 0..g + 2 {
+                if j < g {
+                    v2.push(vals[kk * g + j].clone());
+                    t2.push(tg[kk * g + j]);
+                    keep.push(1.0);
+                } else {
+                    v2.push(rnd(3, 180 + j as u64, -50.0, 50.0));
+                    t2.push(1);
+                    keep.push(0.0);
+                }
+            }
+        }
+        let (x2, valid2) = padded_logits(&v2, k, 1.0);
+        let got2 = masked_group_info_nce(Tensor::from_f64s(x2, [s, g + 2, k], dtype), &IntTensor::from_data(t2, [s, g + 2]), &BoolTensor::from_data(valid2, [s, g + 2, k]), Some(&Tensor::from_f64s(keep, [s, g + 2], dtype))).to_vec_f64();
+        assert_close(&format!("{dtype:?} with dropped groups"), &got2, &want, tol);
+    }
+}
+
+/// Masked entries (and dropped groups) get exactly zero gradient; the valid entries' gradients
+/// match f64 finite differences.
+#[test]
+fn group_info_nce_masked_entries_get_zero_gradient() {
+    let (s, g, kmax, k) = (2, 5, 6, 8);
+    let (sizes, tg) = groups(s, g, kmax, 190);
+    let vals: Vec<Vec<f64>> = sizes.iter().enumerate().map(|(i, &n)| rnd(n, 191 + i as u64, -2.0, 2.0)).collect();
+    let (x, valid) = padded_logits(&vals, k, 3.0);
+    let targets = IntTensor::from_data(tg, [s, g]);
+    let keep: Vec<f64> = (0..s * g).map(|i| if i % 4 == 3 { 0.0 } else { 1.0 }).collect();
+    let valid_t = BoolTensor::from_data(valid.clone(), [s, g, k]);
+    let keep_t = |dtype| Tensor::from_f64s(keep.clone(), [s, g], dtype);
+    for dtype in [DType::F32, DType::F64] {
+        let xt = Tensor::from_f64s(x.clone(), [s, g, k], dtype).require_grad();
+        let gx = xt.grad(&masked_group_info_nce(xt.clone(), &targets, &valid_t, Some(&keep_t(dtype))).sum().backward()).unwrap().to_vec_f64();
+        for (i, gv) in gx.iter().enumerate() {
+            let dropped = keep[i / k] == 0.0;
+            if !valid[i] || dropped {
+                assert!(gv.to_bits() == 0, "{dtype:?}: masked entry {i} has gradient {gv:e}");
+            } else {
+                assert!(*gv != 0.0, "{dtype:?}: valid entry {i} has no gradient");
+            }
+        }
+    }
+    fd_input("group InfoNCE", &x, &[s, g, k], &|xt| masked_group_info_nce(xt, &targets, &valid_t, Some(&keep_t(DType::F64))), 1e-6, 1e-7);
+}

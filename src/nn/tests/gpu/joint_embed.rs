@@ -268,8 +268,71 @@ fn body_vicreg_on_the_device() {
     println!("{TAG} VICReg: terms within {:.1e} and gradients within {:.1e} of CpuRef, zero hinge above 1, zero covariance whitened, constant hinge 0.99, byte-identical run to run", worst[0], worst[1]);
 }
 
+// ------------------------------------------------------------------ masked group InfoNCE
+
+/// Loss and logit gradient of the masked group InfoNCE on `device`.
+fn nce_run(x: &[f64], tg: &[i64], valid: &[bool], keep: Option<&[f64]>, dims: [usize; 3], device: Device) -> (Vec<f32>, Vec<f32>) {
+    let [s, g, _] = dims;
+    nt::set_default_device(device).unwrap();
+    let xt = t32(x, &dims).require_grad();
+    let keep = keep.map(|k| t32(k, &[s, g]));
+    let l = masked_group_info_nce(xt.clone(), &nt::IntTensor::from_data(tg.to_vec(), [s, g]), &BoolTensor::from_data(valid.to_vec(), dims), keep.as_ref());
+    assert_eq!(l.device(), device);
+    let gx = xt.grad(&l.clone().sum().backward()).unwrap().to_vec();
+    let out = (l.to_vec(), gx);
+    nt::set_default_device(R).unwrap();
+    out
+}
+
+#[test]
+#[ignore = "run by its wrapper in a fresh process"]
+fn body_group_info_nce_on_the_device() {
+    use rand::Rng;
+    let (s, g, k) = (3, 24, 12);
+    let dims = [s, g, k];
+    let mut r = rng(400);
+    let sizes: Vec<usize> = (0..s * g).map(|_| r.gen_range(2..=10)).collect();
+    let tg: Vec<i64> = sizes.iter().map(|&n| r.gen_range(0..n) as i64).collect();
+    let mut x = rnd(s * g * k, 401, -3.0, 3.0);
+    let valid: Vec<bool> = (0..s * g * k).map(|i| i % k < sizes[i / k]).collect();
+    let keep: Vec<f64> = (0..s * g).map(|i| if i % 5 == 4 { 0.0 } else { 1.0 }).collect();
+    let cpu = nce_run(&x, &tg, &valid, Some(&keep), dims, R);
+    let dev = nce_run(&x, &tg, &valid, Some(&keep), dims, M);
+    let (e0, e1) = (rel(&dev.0, &cpu.0), rel(&dev.1, &cpu.1));
+    assert!(e0 <= 1e-5 && e1 <= 1e-4, "{TAG} group InfoNCE: loss {e0:e}, gradient {e1:e} from CpuRef");
+    let again = nce_run(&x, &tg, &valid, Some(&keep), dims, M);
+    assert_bits(&format!("{TAG} InfoNCE run-to-run loss"), &dev.0, &again.0);
+    assert_bits(&format!("{TAG} InfoNCE run-to-run gradient"), &dev.1, &again.1);
+    // Masked entries and dropped groups: exactly zero gradient.
+    for (i, gv) in dev.1.iter().enumerate() {
+        if !valid[i] || keep[i / k] == 0.0 {
+            assert!(gv.to_bits() == 0, "{TAG}: masked entry {i} has a gradient");
+        }
+    }
+    // The pads' values do not matter, to the bit.
+    for (i, v) in x.iter_mut().enumerate() {
+        if !valid[i] {
+            *v = *v * 1e5 - 7.0;
+        }
+    }
+    let other = nce_run(&x, &tg, &valid, Some(&keep), dims, M);
+    assert_bits(&format!("{TAG} InfoNCE other pad values"), &dev.0, &other.0);
+    // All valid, no group mask: cross_entropy on the device, to the bit.
+    let full = vec![true; s * g * k];
+    let tf: Vec<i64> = (0..s * g).map(|i| (i % k) as i64).collect();
+    let a = nce_run(&x, &tf, &full, None, dims, M);
+    nt::set_default_device(M).unwrap();
+    let xt = t32(&x, &dims).require_grad();
+    let ce = cross_entropy(xt.clone().reshape([s, g, 1, k]), &nt::IntTensor::from_data(tf, [s, g, 1]));
+    let gce = xt.grad(&ce.clone().sum().backward()).unwrap().to_vec();
+    assert_bits(&format!("{TAG} InfoNCE = cross_entropy (loss)"), &a.0, &ce.to_vec());
+    assert_bits(&format!("{TAG} InfoNCE = cross_entropy (gradient)"), &a.1, &gce);
+    nt::set_default_device(R).unwrap();
+    println!("{TAG} group InfoNCE: loss within {e0:.1e} and gradient within {e1:.1e} of CpuRef, masked entries zero-gradient, pads' values irrelevant, equal to cross_entropy on full groups, byte-identical run to run");
+}
+
 /// The joint-embedding bodies, in a fresh process.
 #[test]
 fn joint_embed_ops_on_the_device() {
-    crate::tensor::tests::isolated_bodies(&here!("body_"), 3);
+    crate::tensor::tests::isolated_bodies(&here!("body_"), 4);
 }

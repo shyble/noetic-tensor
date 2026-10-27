@@ -44,7 +44,7 @@ pub use init::Init;
 pub use kv_cache::{DecoderCache, KvCache};
 pub use linear::{linear, linear_b, linear_init, Linear};
 pub use loss_scale::{all_finite, LossScale};
-pub use loss::{cross_entropy, cross_entropy_with, kl_div, masked_cross_entropy, mse, nll, vicreg, vicreg_covariance, vicreg_variance, CeOptions, Vicreg, VicregWeights};
+pub use loss::{cross_entropy, cross_entropy_with, kl_div, masked_cross_entropy, masked_group_info_nce, mse, nll, vicreg, vicreg_covariance, vicreg_variance, CeOptions, Vicreg, VicregWeights};
 pub use mlp::{gated_mlp, mlp, swiglu, GatedMlp, GatedMlpConfig, Mlp, MlpExt, MlpExtension, MlpTransform};
 pub use moe::{moe, Expert, ExpertKind, Moe, MoeConfig, MoeOutput};
 pub use module::{Module, ModuleT};

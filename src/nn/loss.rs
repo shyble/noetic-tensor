@@ -2,7 +2,8 @@
 //! own gradient, since the seeds' losses do not interact. The operation order is fixed
 //! (`log_softmax`, one-hot product, negated sum).
 
-use crate::tensor::{log_softmax, IntTensor, Tensor};
+use super::attention::PAD_FILL;
+use crate::tensor::{log_softmax, BoolTensor, IntTensor, Tensor};
 
 /// Per-token negative log-likelihood of `targets` under `logits`: `[S, B, T, V]` and `[S, B, T]`
 /// → `[S, B·T]`.
@@ -164,4 +165,25 @@ pub fn vicreg(za: Tensor, zb: Tensor, w: VicregWeights) -> Vicreg {
     let invariance = mse(za, &zb);
     let loss = invariance.clone().mul_scalar(w.invariance) + variance.clone().mul_scalar(w.variance) + covariance.clone().mul_scalar(w.covariance);
     Vicreg { loss, invariance, variance, covariance }
+}
+
+/// InfoNCE over variable-size groups, per seed `[S]`: group g of seed s scores its candidates
+/// `logits[s, g, ..]` (`[S, G, K]`, similarities already divided by the temperature), of which
+/// `valid[s, g, k]` (`[S, G, K]`, true = a candidate) are real and the rest padding, and
+/// `targets[s, g]` (`[S, G]`) is the positive's index (it must be a valid one). The loss is the
+/// masked log-softmax's negative log-likelihood of the positive: padded entries are filled with
+/// `PAD_FILL` (−1e9, finite) before `log_softmax`, so they take no probability and get exactly
+/// zero gradient. `groups` (`[S, G]`, 0 or 1) optionally drops whole groups: the mean is then
+/// over the kept groups (`masked_cross_entropy`'s). With every entry valid and no group mask this
+/// is `cross_entropy` on `[S, G, 1, K]`, to the bit.
+pub fn masked_group_info_nce(logits: Tensor, targets: &IntTensor, valid: &BoolTensor, groups: Option<&Tensor>) -> Tensor {
+    let [s, g, k] = logits.dims();
+    assert_eq!(valid.shape(), &[s, g, k], "group InfoNCE: valid mask shape");
+    assert_eq!(targets.shape(), &[s, g], "group InfoNCE: targets shape");
+    let l4 = logits.mask_fill(valid.clone().bool_not(), PAD_FILL).reshape([s, g, 1, k]);
+    let t3 = targets.clone().reshape([s, g, 1]);
+    match groups {
+        None => cross_entropy(l4, &t3),
+        Some(m) => masked_cross_entropy(l4, &t3, &m.clone().reshape([s, g, 1])),
+    }
 }
