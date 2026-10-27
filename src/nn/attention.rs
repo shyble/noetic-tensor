@@ -10,6 +10,10 @@
 //! - a key padding mask `[S, B, T]` (true = pad): padded keys get −1e9 (finite, so a query whose
 //!   every visible key is a pad reads a finite average instead of NaN), and padded query rows
 //!   output exactly 0 (before `wo`, which has no bias).
+//!
+//! For sets (non-causal attention over 2–10 examples padded to a common length) the padding mask
+//! makes a padded set equal its unpadded self at the real positions, and `masked_mean_pool` reads
+//! one vector per set that does not depend on the order of its examples.
 
 use super::linear::{linear, Linear};
 use super::module::Module;
@@ -36,6 +40,32 @@ impl AttentionConfig {
     /// Causal multi-head attention without RoPE (the default).
     pub fn causal(d: usize, heads: usize) -> Self {
         AttentionConfig { d, heads, kv_heads: heads, causal: true, rope: None }
+    }
+
+    /// Non-causal multi-head attention without RoPE: every position sees every unpadded
+    /// position (set encoders; pass the key padding mask to `forward_with`).
+    pub fn non_causal(d: usize, heads: usize) -> Self {
+        AttentionConfig { d, heads, kv_heads: heads, causal: false, rope: None }
+    }
+}
+
+/// The mean over each sequence's unpadded positions: `x` `[S, B·t, d]` and `pad` `[S, B, t]`
+/// (true = pad) → `[S, B, d]`. Padded positions are multiplied by 0 before the sum (so they get
+/// zero gradient), the sum is divided by max(count, 1), and a sequence with no unpadded position
+/// pools to 0. Without a mask it is the plain mean over the t positions.
+pub fn masked_mean_pool(x: &Tensor, t: usize, pad: Option<&BoolTensor>) -> Tensor {
+    let [s, n, d] = x.dims();
+    assert!(t > 0 && n % t == 0, "pool: {n} tokens are not whole sequences of {t}");
+    let b = n / t;
+    let x4 = x.clone().reshape([s, b, t, d]);
+    match pad {
+        None => x4.mean_dim(2).reshape([s, b, d]),
+        Some(p) => {
+            assert_eq!(p.shape(), &[s, b, t], "padding mask shape");
+            let keep = p.clone().bool_not().float_dtype(x.dtype()).reshape([s, b, t, 1]);
+            let count = keep.clone().sum_dim(2).clamp_min(1.0); // [S, B, 1, 1]
+            ((x4 * keep).sum_dim(2) / count).reshape([s, b, d])
+        }
     }
 }
 

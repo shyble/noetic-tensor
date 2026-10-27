@@ -17,6 +17,7 @@ mod fd;
 #[cfg(all(feature = "metal", target_os = "macos"))]
 mod metal_perf;
 mod components;
+mod joint_embed;
 mod naive;
 mod options;
 mod props;

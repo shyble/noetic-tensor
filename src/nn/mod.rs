@@ -32,7 +32,7 @@ mod tests;
 
 pub use activation::{erf, gelu_erf, gelu_tanh, relu, tanh, Activation};
 pub use adam::{Adam, AdamConfig, DecayOrder};
-pub use attention::{attention, causal_attention, AttentionConfig, MultiHeadAttention};
+pub use attention::{attention, causal_attention, masked_mean_pool, AttentionConfig, MultiHeadAttention};
 pub use block::{block, block_with, Block, BlockConfig, FeedForward, MlpKind, MoeSpec, Norm, NormKind};
 pub use clip::{clip_grad_norm_per_seed, clip_grad_value, grad_norms_per_seed};
 pub use decoder::{BlockNaming, Decoder, DecoderConfig, DecoderOutput, ForwardOptions, Positions};

@@ -21,6 +21,9 @@ mod metal {
     mod training {
         include!("training.rs");
     }
+    mod joint_embed {
+        include!("joint_embed.rs");
+    }
 }
 
 #[cfg(feature = "cuda")]
@@ -40,5 +43,8 @@ mod cuda {
     }
     mod training {
         include!("training.rs");
+    }
+    mod joint_embed {
+        include!("joint_embed.rs");
     }
 }
