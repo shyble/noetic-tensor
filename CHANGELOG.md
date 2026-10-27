@@ -1,5 +1,15 @@
 # Changes
 
+## Unreleased (branch je-ops)
+
+Additions for joint-embedding training (not yet released; no version bump). Each is tested on the CPU reference backend against f64 host references and finite differences, and on Metal (an Apple GPU, macOS) and CUDA (an RTX 4060 Laptop GPU, driver 617.14, Windows) against CpuRef, byte-identical run to run; a small joint-embedding run (set encoder, target EMA, VICReg, group InfoNCE, rank monitor, Adam) gives the same state hash twice for the same seed on each backend, and in two processes on Metal and on CUDA (each device has its own hash; never compared across devices).
+
+- **Set attention.** `AttentionConfig::non_causal` and `masked_mean_pool` over the existing key padding mask: a set of 2–10 examples padded to a common length equals its unpadded self at the real positions within fp32 1e-6 (not to the bit: the reductions group their sums by length), padded positions get exactly zero gradient, and the pooled output is invariant to the examples' order within 1e-6.
+- **`TargetEma`** (`nn::target_ema`): the target vars as a copy of the online vars, `θ′ ← τθ′ + (1−τ)θ` with `TauSchedule`, no bias correction, detached reads, save and restore of θ′, the step and the schedule. `TauSchedule::cosine(K)` is BYOL's cosine 0.996 → 1 over K updates (endpoints exact); a linear schedule is also used in published work (not built here). There is no default schedule: K is required, and K = 0 is refused. `nn::ema::Ema` is unchanged.
+- **VICReg** (`vicreg`, `vicreg_variance`, `vicreg_covariance`, `VicregWeights`, default 25/25/1, γ 1, ε 1e-4), per seed, with the reference implementation's grouping (variance hinges averaged, covariance terms summed); its μ = 25 is the paper's μ = 12.5 in equation 6, which sums the two hinges.
+- **Masked group InfoNCE** (`masked_group_info_nce`): variable-size candidate groups padded to K with a masked log-softmax and an optional group mask; `cross_entropy` to the bit on full groups. F16 logits are refused (the pad fill −1e9 overflows F16; padded attention should not run in F16 either). Debug builds check that each kept group's target is a valid entry (`check_group_targets`).
+- **Effective-rank monitor** (`nn::rank`), host-side f64 outside autograd, with per-dimension standard deviations. Two spectra: `effective_rank` / `effective_rank_of` is Roy–Vetterli over the **covariance eigenvalues** λ; `effective_rank_singular` / `effective_rank_of_singular` is RankMe over the **singular values** σ = √λ(ZᵀZ) of the uncentred embedding matrix. They agree on flat spectra and the singular-value rank is larger otherwise; the caller chooses which one to gate on. `jacobi` reports its sweep count and whether it converged (`jacobi_eigenvalues` panics if not); a rotated d = 128 spectrum converges in 10 sweeps.
+
 ## 0.6.1
 
 Released 16 October 2026. Documentation only; no code changed. The 0.6.0 release's deterministic mode, with every 0.6.0 option off, was tested on two GPUs in one machine and on two machines:
