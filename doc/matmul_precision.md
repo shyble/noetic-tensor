@@ -1,6 +1,6 @@
 # Reduced-precision matrix products on the GPU (released in 0.6.0)
 
-Status: built; tested on one machine per GPU kind (CUDA: an RTX 4060 Laptop GPU, compute capability 8.9, on Windows; Metal: an Apple GPU of the Apple7 family on macOS; shown: every product within the stated tolerance on fixed shapes, a training run repeated in a new process and resumed from a checkpoint in a new process with every per-step weight hash the same, the key apart from f32's, and with the option off the 0.5.0 results unchanged); multi-GPU, multi-machine and datacenter runs untested. Its results are its own kind: they are never compared byte for byte with, or pooled with, f32 results.
+Status: built; tested on one machine per GPU kind (CUDA: an NVIDIA GPU, compute capability 8.9, on Windows; Metal: an Apple GPU of the Apple7 family on macOS; shown: every product within the stated tolerance on fixed shapes, a training run repeated in a new process and resumed from a checkpoint in a new process with every per-step weight hash the same, the key apart from f32's, and with the option off the 0.5.0 results unchanged); multi-GPU, multi-machine and datacenter runs untested. Its results are its own kind: they are never compared byte for byte with, or pooled with, f32 results.
 
 ## What it is
 
@@ -22,7 +22,7 @@ Status: built; tested on one machine per GPU kind (CUDA: an RTX 4060 Laptop GPU,
 - `Tensor::matmul_with(rhs, precision)` names the precision of one product.
 - A product's backward pass runs its two products (the gradients of both operands) at the forward product's precision.
 - **The key.** While the calling thread's precision is `Half`, `tensor::gpu_platform_key(device)` ends with the product's part, `-gemm-<operands>-<instruction>-f32acc-tile64x64x32-kernels-<16 hex digits of the kernel source's sha256>` (`tensor::half_gemm_key(device)`):
-  - CUDA: `…-driver-release-617.14-gemm-bf16-mma.m16n8k16-f32acc-tile64x64x32-kernels-<hex>`;
+  - CUDA: `…-driver-release-<release>-gemm-bf16-mma.m16n8k16-f32acc-tile64x64x32-kernels-<hex>`;
   - Metal: `…-macos-Version_27.0.1__Build_26A434_-gemm-f16-simdgroup8x8-f32acc-tile64x64x32-kernels-<hex>`.
   With `F32` the key is 0.5.0's. A process group made while the precision is `Half` carries the part in its key (`nn::dist::device_key` reads `gpu_platform_key`), so a checkpoint taken at one precision is refused at the other (shown below), and a job whose ranks use different precisions is refused at the rendezvous (it follows from the key; not run). Set the precision before the run's keys are taken.
 
@@ -51,7 +51,7 @@ The error against the f32 operands is the operands' rounding (up to 2u, bf16's 2
 
 `examples/half_gemm_gate.rs` (the gate's decoder: width 32, 2 blocks, MLP 64, 2 models on the seed axis, AdamW at lr 0.01, a copy task of 2 fresh items per step), `doc/gates/c1/gate.sh` (Metal) and `doc/gates/c1/win_c1.ps1 -Part gate` (CUDA):
 
-| | CUDA, RTX 4060 Laptop GPU | Metal, Apple GPU |
+| | CUDA, an NVIDIA GPU | Metal, Apple GPU |
 |---|---|---|
 | 200 steps, run twice, each its own process | every per-step weight hash the same; final `d7e6daf3c00737ca84af587f628c0a76f13ac518afe3cfcdbf6ae1e4c6e1e674` | every per-step weight hash the same; final `d206005f238b8d76c49af6da694a92c7b6ae8c53b45a8f1c4f149380c3ff63eb` |
 | 107 steps with checkpoints every 50, then a new process resuming from step 100 to 200 | every per-step hash the uninterrupted run's | the same |
@@ -90,7 +90,7 @@ The library's throughput test (`half_matmul_throughput`, ignored by default; med
 
 Training (`half_gemm_gate`: width 512, 4 blocks, MLP 2048, 16,802,304 parameters per model, 2 models, 64 items per step, 10 steps without the per-step hash; the loop's wall time, median of 3 runs in rotation): CUDA f32 0.485 s, bf16 0.403 s; Metal f32 1.502 s, f16 1.360 s. At this size the products are a part of the step only.
 
-Hardware and keys: CUDA on an NVIDIA GeForce RTX 4060 Laptop GPU (driver 617.14, NVRTC 12.6) with a 12th Gen Intel Core i5-12450H, Windows x86_64, every process on 2 logical CPUs at below-normal priority, key `cuda-NVIDIA_GeForce_RTX_4060_Laptop_GPU-sm89-driver13040-nvrtc12.6-nofastmath-fmadoff-kernels-<hex>-driver-release-617.14` (f32) and that key with `-gemm-bf16-mma.m16n8k16-f32acc-tile64x64x32-kernels-<hex>` (bf16); Metal on an Apple GPU (Apple7 family, architecture applegpu_g13s) in a MacBookPro18,1, macOS 27.0.1, every process at background priority (`taskpolicy -b`), on a machine shared with other work, key `metal-<the GPU's name>-mathmode-safe-kernels-<hex>-family-apple7-metal4-mac2-arch-applegpu_g13s-macos-Version_27.0.1__Build_26A434_` (f32) and that key with `-gemm-f16-simdgroup8x8-f32acc-tile64x64x32-kernels-<hex>` (f16).
+Hardware and keys: CUDA on an NVIDIA GPU (NVRTC 12.6) on the Windows x86_64 host, every process on 2 logical CPUs at below-normal priority, key `cuda-<the GPU's name>-sm89-driver<version>-nvrtc12.6-nofastmath-fmadoff-kernels-<hex>-driver-release-<release>` (f32) and that key with `-gemm-bf16-mma.m16n8k16-f32acc-tile64x64x32-kernels-<hex>` (bf16); Metal on an Apple GPU (Apple7 family), macOS 27.0.1, every process at background priority (`taskpolicy -b`), on a machine shared with other work, key `metal-<the GPU's name>-mathmode-safe-kernels-<hex>-family-apple7-metal4-mac2-arch-<architecture>-macos-Version_27.0.1__Build_26A434_` (f32) and that key with `-gemm-f16-simdgroup8x8-f32acc-tile64x64x32-kernels-<hex>` (f16).
 
 ### With the option off, nothing changes
 

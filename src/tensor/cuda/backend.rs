@@ -527,8 +527,8 @@ const MAX_SORT: usize = 4096;
 /// matrixmultiply's k block (the matmul kernels close their fma chains every KC).
 const KC: usize = 256;
 
-/// A 128-tile product with fewer output tiles than this splits over k (two waves of the RTX
-/// 4060 Laptop's 24 SMs).
+/// A 128-tile product with fewer output tiles than this splits over k (two waves on a
+/// 24-SM GPU).
 const SPLIT_BELOW_TILES: usize = 48;
 
 /// Grid z is limited to 65 535: larger batches run as several launches.
