@@ -2,7 +2,7 @@
 
 ## Unreleased (branch je-ops)
 
-Additions for joint-embedding training (not yet released; no version bump). Each is tested on the CPU reference backend against f64 host references and finite differences, and on Metal against CpuRef (CUDA: see below), byte-identical run to run; a small joint-embedding run (set encoder, target EMA, VICReg, group InfoNCE, rank monitor, Adam) gives the same state hash twice for the same seed on each backend.
+Additions for joint-embedding training (not yet released; no version bump). Each is tested on the CPU reference backend against f64 host references and finite differences, and on Metal (an Apple GPU, macOS) and CUDA (an RTX 4060 Laptop GPU, driver 617.14, Windows) against CpuRef, byte-identical run to run; a small joint-embedding run (set encoder, target EMA, VICReg, group InfoNCE, rank monitor, Adam) gives the same state hash twice for the same seed on each backend, and in two processes on Metal and on CUDA (each device has its own hash; never compared across devices).
 
 - **Set attention.** `AttentionConfig::non_causal` and `masked_mean_pool` over the existing key padding mask: a set of 2–10 examples padded to a common length equals its unpadded self at the real positions within fp32 1e-6 (not to the bit: the reductions group their sums by length), padded positions get exactly zero gradient, and the pooled output is invariant to the examples' order within 1e-6.
 - **`TargetEma`** (`nn::target_ema`): the target vars as a copy of the online vars, `θ′ ← τθ′ + (1−τ)θ` with `TauSchedule` (cosine 0.996 → 1 by default, endpoints exact), no bias correction, detached reads, save and restore of θ′, the step and the schedule. `nn::ema::Ema` is unchanged.
