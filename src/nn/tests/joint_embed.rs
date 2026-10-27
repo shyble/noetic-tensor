@@ -835,3 +835,106 @@ fn joint_embed_run_state_hash_is_reproducible() {
     assert!(l1.iter().all(|x| x.is_finite()));
     println!("cpu-ref joint-embedding run state hash {h1}");
 }
+
+// ------------------------------------------------------------------- review follow-ups
+
+/// There is no default τ schedule: a cosine needs its step count, 0 steps are refused, and a
+/// long schedule keeps moving the target after its first updates (the frozen-after-one-update
+/// default is gone).
+#[test]
+fn tau_schedule_needs_its_step_count() {
+    assert!(std::panic::catch_unwind(|| TauSchedule::cosine(0)).is_err());
+    let zero = TauSchedule::Cosine { start: 0.996, end: 1.0, steps: 0 };
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| TargetEma::new(&online(1), zero))).is_err());
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| TargetEma::new(&online(1), TauSchedule::Constant(1.5)))).is_err());
+    let mut e = TargetEma::new(&online(1), TauSchedule::cosine(1000));
+    for k in 0..3 {
+        let before = bits_of(&e.target());
+        let tau = e.update(&online(40 + k));
+        assert!(tau < 1.0, "update {k}: τ = {tau}");
+        assert_ne!(bits_of(&e.target()), before, "update {k} did not move the target");
+    }
+}
+
+/// `TargetEma::target()` keeps its bits when an optimizer step changes the online map.
+#[test]
+fn target_ema_target_is_unchanged_by_optimizer_step() {
+    let mut vars = online(7);
+    let ema = TargetEma::new(&vars, TauSchedule::cosine(10));
+    let tgt = ema.target();
+    let before = bits_of(&tgt);
+    let mut opt = Adam::new(AdamConfig::default(), ParamGroups::new(&vars), &vars);
+    let lifted = vars.lifted();
+    let x = t32(rnd(2 * 2 * 3, 8, -1.0, 1.0), &[2, 2, 3]);
+    let loss = mse(x.clone().matmul(lifted.var("a.w").clone()), &x.matmul(tgt.var("a.w").clone())) + lifted.var("b.w").clone().sum().reshape([1]);
+    crate::nn::Optimizer::step(&mut opt, &mut vars, lifted.grads(&loss.sum().backward()), 1.0);
+    assert_ne!(bits_of(&vars), before, "the step did not change the online vars");
+    assert_eq!(bits_of(&tgt), before, "a target read changed with the online vars");
+    assert_eq!(bits_of(&ema.target()), before, "θ′ changed with the online vars");
+}
+
+/// RankMe's singular-value rank: flat spectra agree with Roy–Vetterli (identity: d; rank k: k);
+/// it is the entropy rank of √λ, so it exceeds the covariance rank on an unequal spectrum; the
+/// singular values of orthogonal equal-norm columns are equal.
+#[test]
+fn effective_rank_singular_values() {
+    let d = 16;
+    let full = orthonormal(d, d, 1000);
+    let spectrum: Vec<f64> = (0..d).map(|i| 8.0 / (1.0 + i as f64).powi(2)).collect();
+    let rv = effective_rank_of(&spectrum);
+    let sv: Vec<f64> = spectrum.iter().map(|x| x.sqrt()).collect();
+    let rm = effective_rank_of_singular(&sv);
+    assert!(rm > rv + 1.0, "RankMe {rm} vs Roy–Vetterli {rv}");
+    assert_eq!(effective_rank_of_singular(&vec![1.0; d]), effective_rank_of(&vec![1.0; d]));
+    // Rows Z = Q·diag(√λ)-shaped: ZᵀZ has eigenvalues λ, so its singular values are √λ.
+    let z: Vec<f64> = (0..d).flat_map(|i| { let (full, sv) = (&full, &sv); (0..d).map(move |j| full[i][j] * sv[i]) }).collect();
+    assert_close("singular values", &singular_values(&z, d, d), &sv, 1e-10);
+    // Hadamard columns: orthogonal, equal norm √8.
+    let h = |i: usize, j: usize| if (i & j).count_ones().is_multiple_of(2) { 1.0 } else { -1.0 };
+    let zh: Vec<f64> = (0..8).flat_map(|i| (0..4).map(move |j| h(i, j))).collect();
+    let s = singular_values(&zh, 8, 4);
+    assert_close("Hadamard singular values", &s, &[8f64.sqrt(); 4], 1e-12);
+    let st = embedding_stats(&t64(zh.clone(), &[1, 8, 4]));
+    assert!((st[0].effective_rank_singular - 4.0).abs() <= 1e-12);
+    // A rank-3 embedding (uncentred): at most 3.
+    let q = orthonormal(d, 3, 1100);
+    let x = rnd(50 * 3, 1101, -1.0, 1.0);
+    let zr: Vec<f64> = (0..50).flat_map(|i| { let (x, q) = (&x, &q); (0..d).map(move |j| (0..3).map(|c| x[i * 3 + c] * q[c][j]).sum::<f64>()) }).collect();
+    let r = effective_rank_singular(&t64(zr, &[1, 50, d]))[0];
+    assert!(r <= 3.0 + 1e-6 && r > 2.0, "rank-3 RankMe {r}");
+}
+
+/// Jacobi reports its sweeps and convergence; at d = 128 a rotated known spectrum converges in
+/// a few sweeps and is recovered.
+#[test]
+fn jacobi_converges_at_d128() {
+    let d = 128;
+    let q = orthonormal(d, d, 1200);
+    let spectrum: Vec<f64> = (0..d).map(|i| 5.0 * (-(i as f64) / 20.0).exp()).collect();
+    let j = jacobi(&from_spectrum(&q, &spectrum, d), d);
+    assert!(j.converged, "not converged after {} sweeps", j.sweeps);
+    assert!(j.sweeps >= 1 && j.sweeps <= 20, "{} sweeps", j.sweeps);
+    assert_close("d 128 spectrum", &j.eigenvalues, &spectrum, 1e-10);
+    let eye: Vec<f64> = (0..d * d).map(|i| if i / d == i % d { 1.0 } else { 0.0 }).collect();
+    let je = jacobi(&eye, d);
+    assert!(je.converged && je.sweeps == 0);
+    println!("Jacobi d 128: {} sweeps", j.sweeps);
+}
+
+/// The group-target check: valid targets pass; a masked or out-of-range target of a kept group
+/// fails; a dropped group's target is not checked. F16 logits are refused.
+#[test]
+fn group_targets_are_checked() {
+    let valid = BoolTensor::from_data(vec![true, true, false, true, false, false], [1, 2, 3]);
+    let ok = IntTensor::from_data(vec![1, 0], [1, 2]);
+    assert!(check_group_targets(&ok, &valid, None).is_ok());
+    assert!(check_group_targets(&IntTensor::from_data(vec![2, 0], [1, 2]), &valid, None).is_err());
+    assert!(check_group_targets(&IntTensor::from_data(vec![0, 3], [1, 2]), &valid, None).is_err());
+    assert!(check_group_targets(&IntTensor::from_data(vec![0, -1], [1, 2]), &valid, None).is_err());
+    let bad = IntTensor::from_data(vec![0, 2], [1, 2]);
+    let drop = Tensor::from_data(vec![1.0f32, 0.0], [1, 2]);
+    assert!(check_group_targets(&bad, &valid, Some(&drop)).is_ok());
+    assert!(check_group_targets(&bad, &valid, None).is_err());
+    let f16 = Tensor::from_f64s(vec![0.0; 6], [1, 2, 3], DType::F32).cast(DType::F16);
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| masked_group_info_nce(f16, &ok, &valid, None))).is_err());
+}

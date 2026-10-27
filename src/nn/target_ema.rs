@@ -7,7 +7,16 @@
 //! of the weights for evaluation); here θ′ is the copy itself from step 0.
 //!
 //! The schedule is BYOL's cosine: `τ_k = end − (end − start)·(cos(π·k/K) + 1)/2` for the update
-//! at step k < K, and `end` from step K on (the default 0.996 → 1). Each update is two scalar
+//! at step k < K, and `end` from step K on (`TauSchedule::cosine(K)`: 0.996 → 1). joint-embedding work's own
+//! schedule is linear from 0.996 to 1 (not built here). There is no
+//! default schedule: a cosine needs its step count K ≥ 1 from the caller (a default K would freeze
+//! the target after K updates), and `TargetEma::new` refuses K = 0.
+//!
+//! ```compile_fail
+//! let _ = noetic::nn::TauSchedule::default(); // no Default: the step count is required
+//! ```
+//!
+//! Each update is two scalar
 //! multiplications and an addition per var, on the vars' device and in their dtype, so it is
 //! deterministic wherever those operations are.
 
@@ -25,16 +34,10 @@ pub enum TauSchedule {
     Cosine { start: f64, end: f64, steps: u64 },
 }
 
-impl Default for TauSchedule {
-    /// The BYOL and joint-embedding work default: 0.996 → 1 (the step count is the caller's; 1 here).
-    fn default() -> Self {
-        TauSchedule::Cosine { start: 0.996, end: 1.0, steps: 1 }
-    }
-}
-
 impl TauSchedule {
-    /// The cosine schedule 0.996 → 1 over `steps` updates.
+    /// The cosine schedule 0.996 → 1 over `steps` ≥ 1 updates (the length of training).
     pub fn cosine(steps: u64) -> Self {
+        assert!(steps > 0, "a cosine τ schedule needs its step count (≥ 1)");
         TauSchedule::Cosine { start: 0.996, end: 1.0, steps }
     }
 
@@ -82,7 +85,15 @@ pub struct TargetEma {
 
 impl TargetEma {
     /// θ′ = a copy of `online` (untracked), at step 0.
+    /// Panics on a cosine schedule of 0 steps or a τ outside [0, 1].
     pub fn new(online: &VarMap, schedule: TauSchedule) -> Self {
+        match schedule {
+            TauSchedule::Constant(t) => assert!((0.0..=1.0).contains(&t), "τ = {t} outside [0, 1]"),
+            TauSchedule::Cosine { start, end, steps } => {
+                assert!(steps > 0, "a cosine τ schedule needs its step count (≥ 1)");
+                assert!((0.0..=1.0).contains(&start) && (0.0..=1.0).contains(&end), "τ {start} → {end} outside [0, 1]");
+            }
+        }
         TargetEma { schedule, target: online.detached(), step: 0 }
     }
 

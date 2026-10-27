@@ -13,7 +13,8 @@
 //!
 //! For sets (non-causal attention over 2–10 examples padded to a common length) the padding mask
 //! makes a padded set equal its unpadded self at the real positions, and `masked_mean_pool` reads
-//! one vector per set that does not depend on the order of its examples.
+//! one vector per set that does not depend on the order of its examples. Padded attention should
+//! not run in F16: the pad fill −1e9 is beyond its range.
 
 use super::linear::{linear, Linear};
 use super::module::Module;

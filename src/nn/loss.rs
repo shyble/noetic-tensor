@@ -98,8 +98,11 @@ pub fn kl_div(pred_logits: Tensor, target_logits: Tensor) -> Tensor {
     per.reshape([s, n]).mean_dim(1).reshape([s])
 }
 
-/// Weights and constants of `vicreg` (Bardes, Ponce and LeCun 2022). The default is the paper's:
-/// invariance λ = 25, variance μ = 25, covariance ν = 1, the hinge target γ = 1 and ε = 1e-4.
+/// Weights and constants of `vicreg` (Bardes, Ponce and LeCun 2022). The default is the reference
+/// code's: invariance λ = 25, variance μ = 25, covariance ν = 1, the hinge target γ = 1 and
+/// ε = 1e-4. `vicreg` averages the two branches' hinges, as that code does, so its μ = 25 equals
+/// μ = 12.5 in the paper's equation 6, `λ·s + μ·[v(Z) + v(Z′)] + ν·[c(Z) + c(Z′)]` (the paper's
+/// sum of the two hinges).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct VicregWeights {
     pub invariance: f64,
@@ -176,14 +179,44 @@ pub fn vicreg(za: Tensor, zb: Tensor, w: VicregWeights) -> Vicreg {
 /// zero gradient. `groups` (`[S, G]`, 0 or 1) optionally drops whole groups: the mean is then
 /// over the kept groups (`masked_cross_entropy`'s). With every entry valid and no group mask this
 /// is `cross_entropy` on `[S, G, 1, K]`, to the bit.
+///
+/// Not in F16: −1e9 is beyond its range (it would become −∞), so F16 logits are refused; run
+/// padded losses in F32 (or BF16, F64). Debug builds check that every kept group's target is a
+/// valid entry (`check_group_targets`, a host read); release builds do not.
 pub fn masked_group_info_nce(logits: Tensor, targets: &IntTensor, valid: &BoolTensor, groups: Option<&Tensor>) -> Tensor {
     let [s, g, k] = logits.dims();
     assert_eq!(valid.shape(), &[s, g, k], "group InfoNCE: valid mask shape");
     assert_eq!(targets.shape(), &[s, g], "group InfoNCE: targets shape");
+    assert!(logits.dtype() != crate::tensor::DType::F16, "group InfoNCE: padded losses do not run in F16 (the pad fill −1e9 overflows it)");
+    #[cfg(debug_assertions)]
+    if let Err(e) = check_group_targets(targets, valid, groups) {
+        panic!("{e}");
+    }
     let l4 = logits.mask_fill(valid.clone().bool_not(), PAD_FILL).reshape([s, g, 1, k]);
     let t3 = targets.clone().reshape([s, g, 1]);
     match groups {
         None => cross_entropy(l4, &t3),
         Some(m) => masked_cross_entropy(l4, &t3, &m.clone().reshape([s, g, 1])),
     }
+}
+
+/// Every kept group's target (`groups` 1, or every group without a mask) is in range and a valid
+/// entry: the check `masked_group_info_nce` runs in debug builds (it reads the masks to the
+/// host). The error names the first bad group.
+pub fn check_group_targets(targets: &IntTensor, valid: &BoolTensor, groups: Option<&Tensor>) -> std::result::Result<(), String> {
+    let sh = valid.shape().to_vec();
+    let (sg, k) = (sh[0] * sh[1], sh[2]);
+    let t = targets.to_vec();
+    let v = valid.to_vec();
+    let keep = groups.map(|m| m.to_vec_f64());
+    for i in 0..sg {
+        if keep.as_ref().is_some_and(|m| m[i] == 0.0) {
+            continue;
+        }
+        let ti = t[i];
+        if ti < 0 || ti as usize >= k || !v[i * k + ti as usize] {
+            return Err(format!("group InfoNCE: group {i} (seed {}, group {}) has target {ti}, not a valid entry of {k}", i / sh[1], i % sh[1]));
+        }
+    }
+    Ok(())
 }
