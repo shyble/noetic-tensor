@@ -27,6 +27,9 @@ mod metal {
     mod bce_l2 {
         include!("bce_l2.rs");
     }
+    mod rl {
+        include!("rl.rs");
+    }
 }
 
 #[cfg(feature = "cuda")]
@@ -52,5 +55,8 @@ mod cuda {
     }
     mod bce_l2 {
         include!("bce_l2.rs");
+    }
+    mod rl {
+        include!("rl.rs");
     }
 }
