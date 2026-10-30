@@ -16,7 +16,7 @@ fn t32(v: Vec<f64>, shape: &[usize]) -> Tensor {
 }
 
 /// Central differences of `f(x)·w` (w fixed random) against autodiff, at every element (f64).
-fn fd_input(what: &str, x: &[f64], shape: &[usize], f: &dyn Fn(Tensor) -> Tensor, eps: f64, tol: f64) {
+pub(crate) fn fd_input(what: &str, x: &[f64], shape: &[usize], f: &dyn Fn(Tensor) -> Tensor, eps: f64, tol: f64) {
     let y0 = f(t64(x.to_vec(), shape));
     let wt = t64(rnd(y0.numel(), 78, -1.0, 1.0), y0.shape());
     let xt = t64(x.to_vec(), shape).require_grad();

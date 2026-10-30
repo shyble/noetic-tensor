@@ -18,6 +18,7 @@ mod fd;
 mod metal_perf;
 mod components;
 mod joint_embed;
+mod bce_l2;
 mod naive;
 mod options;
 mod props;
