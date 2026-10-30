@@ -251,7 +251,7 @@ fn ppo_host(lp: &[f64], old: &[f64], adv: &[f64], mask: &[f64], clip: Clip) -> V
 fn clipped_policy_loss_matches_f64_reference() {
     let (c, old, adv) = ppo_case(840);
     let lp = c.logp_host();
-    for clip in [Clip::symmetric(0.2), Clip { low: 0.2, high: 0.28 }] {
+    for clip in [Clip::symmetric(0.2), Clip::new(0.2, 0.28)] {
         let host = ppo_host(&lp, &old, &adv, &c.mask, clip);
         for r in REDUCTIONS {
             let want = reduce_host(&host, &c.mask, c.sh, r);
@@ -450,11 +450,12 @@ fn kl_estimators_match_reference_and_finite_differences() {
             let want = reduce_host(&host, &c.mask, c.sh, r);
             for (dtype, tol) in [(DType::F64, 1e-13), (DType::F32, 2e-6)] {
                 let x = Tensor::from_f64s(c.logits.clone(), c.lshape(), dtype);
-                let got = kl_estimate(token_log_probs(x, &tok), &Tensor::from_f64s(lr.clone(), c.sh.to_vec(), dtype), e, Some(&c.mask(dtype)), r).to_vec_f64();
+                let got = kl_estimate(token_log_probs(x, &tok), &Tensor::from_f64s(lr.clone(), c.sh.to_vec(), dtype), e, None, Some(&c.mask(dtype)), r).to_vec_f64();
                 assert_close(&format!("{e:?} {r:?} {dtype:?}"), &got, &want, tol);
             }
             let (lrt, m) = (t64(lr.clone(), &c.sh), c.mask(DType::F64));
-            fd_input(&format!("{e:?} {r:?}"), &c.logits, &c.lshape(), &|x| kl_estimate(token_log_probs(x, &tok), &lrt, e, Some(&m), r), 1e-6, 1e-7);
+            fd_input(&format!("{e:?} {r:?}"), &c.logits, &c.lshape(), &|x| kl_estimate(token_log_probs(x, &tok), &lrt, e, None, Some(&m), r), 1e-6, 1e-7);
+            fd_input(&format!("{e:?} {r:?} clamped"), &c.logits, &c.lshape(), &|x| kl_estimate(token_log_probs(x, &tok), &lrt, e, Some(KL_DELTA_CLAMP), Some(&m), r), 1e-6, 1e-7);
         }
     }
 }
@@ -476,7 +477,7 @@ fn kl_estimator_expectations_by_enumeration() {
     let expect = |e: KlEstimator| -> (f64, Vec<f64>) {
         let x = t64(pl.clone(), &[1, 1, 1, v]).require_grad();
         let rows = Tensor::cat(vec![x.clone(); v], 2); // [1, 1, V, V]: position t holds the same logits
-        let k = kl_estimate(token_log_probs(rows, &tokens), &t64(lr.clone(), &[1, 1, v]), e, None, TokenReduction::None);
+        let k = kl_estimate(token_log_probs(rows, &tokens), &t64(lr.clone(), &[1, 1, v]), e, None, None, TokenReduction::None);
         let ex = (k * weights.clone()).sum();
         let val = ex.to_vec_f64()[0];
         (val, x.grad(&ex.backward()).unwrap().to_vec_f64())
@@ -513,7 +514,7 @@ fn masking_edges_all_masked_and_one_token() {
         ("PG", Box::new(|x, m, r| policy_gradient_loss(token_log_probs(x, &tok), &adv, Some(m), r))),
         ("PPO", Box::new(|x, m, r| clipped_policy_loss(token_log_probs(x, &tok), &old, &adv, Some(m), Clip::symmetric(0.2), r))),
         ("KL", Box::new(|x, m, r| categorical_kl(x, &refl, Some(m), r))),
-        ("k3", Box::new(|x, m, r| kl_estimate(token_log_probs(x, &tok), &lr, KlEstimator::K3, Some(m), r))),
+        ("k3", Box::new(|x, m, r| kl_estimate(token_log_probs(x, &tok), &lr, KlEstimator::K3, Some(KL_DELTA_CLAMP), Some(m), r))),
         ("entropy", Box::new(|x, m, r| categorical_entropy(x, Some(m), r))),
     ];
     let none = t64(vec![0.0; c.n()], &c.sh);
@@ -633,4 +634,222 @@ fn sampler_refuses_a_position_with_no_allowed_token() {
     let logits = t32(vec![0.0; 6], &[2, 3]);
     let mask = t32(vec![0.0, 0.0, 0.0, f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], &[2, 3]);
     let _ = sample_categorical(&logits, 1.0, Some(&mask), &mut crate::rng::derive(0, "x"));
+}
+
+// ------------------------------------------------------------------ review additions
+
+/// Three rewards of 0.1 have a mean of 0.10000000000000002: with ε = 0 the centred rewards are
+/// rounding noise, and dividing by their standard deviation would give ±1-size advantages. A
+/// group with max == min gives exact zeros under every normalisation.
+#[test]
+fn group_advantages_equal_rewards_are_zero_at_eps_zero() {
+    let r = [0.1, 0.1, 0.1, 1.0, 0.0, 0.0];
+    assert_ne!((0.1f64 + 0.1 + 0.1) / 3.0, 0.1, "the case's mean rounds");
+    for norm in [GroupNorm::Std { eps: 0.0, unbiased: true }, GroupNorm::Std { eps: 0.0, unbiased: false }, GroupNorm::MeanOnly] {
+        let a = group_advantages(&r, 3, norm);
+        assert_eq!(&a[..3], &[0.0, 0.0, 0.0], "{norm:?}");
+        assert!(a[3] > 0.0 && a[4] < 0.0 && a[4] == a[5], "{norm:?}: {a:?}");
+    }
+}
+
+/// PPO's host loss with the clip settings, the log-ratio clamp included.
+fn ppo_host_full(lp: &[f64], old: &[f64], adv: &[f64], mask: &[f64], clip: Clip) -> Vec<f64> {
+    (0..lp.len())
+        .map(|i| {
+            if mask[i] == 0.0 {
+                return 0.0;
+            }
+            let d = lp[i] - old[i];
+            let d = clip.log_ratio_clamp.map_or(d, |b| d.clamp(-b, b));
+            let r = d.exp();
+            let l = (-(r * adv[i])).max(-(r.clamp(1.0 - clip.low, 1.0 + clip.high) * adv[i]));
+            match clip.dual {
+                Some(c) if adv[i] < 0.0 => l.min(-c * adv[i]),
+                _ => l,
+            }
+        })
+        .collect()
+}
+
+/// The dual clip against the host for every reduction, finite differences away from its edge,
+/// zero gradient where it caps, and the clip fraction counting capped tokens; ratios 4.48 (above
+/// c = 3), 1.65, 1.105, 0.95 and 0.67.
+#[test]
+fn clipped_policy_loss_dual_clip() {
+    let c = case(1000, -3.0, 3.0);
+    let lp = c.logp_host();
+    let offs = [-1.5, -0.5, -0.1, 0.05, 0.4];
+    let old: Vec<f64> = lp.iter().enumerate().map(|(i, l)| l + offs[(i * 7 + i / 3) % 5]).collect();
+    let adv: Vec<f64> = rnd(c.n(), 1001, -2.0, 2.0).into_iter().map(|a| if a.abs() < 0.1 { -0.5 } else { a }).collect();
+    let clip = Clip::symmetric(0.2).with_dual(3.0);
+    let host = ppo_host_full(&lp, &old, &adv, &c.mask, clip);
+    let capped: Vec<usize> = (0..c.n()).filter(|&i| c.mask[i] == 1.0 && adv[i] < 0.0 && (lp[i] - old[i]).exp() > 3.0).collect();
+    assert!(!capped.is_empty(), "the case has capped tokens");
+    let (ot, at, m) = (t64(old.clone(), &c.sh), t64(adv.clone(), &c.sh), c.mask(DType::F64));
+    let tok = c.tokens();
+    for r in REDUCTIONS {
+        let got = clipped_policy_loss(token_log_probs(t64(c.logits.clone(), &c.lshape()), &tok), &ot, &at, Some(&m), clip, r).to_vec_f64();
+        assert_close(&format!("dual clip {r:?}"), &got, &reduce_host(&host, &c.mask, c.sh, r), 1e-13);
+        fd_input(&format!("dual clip {r:?}"), &c.logits, &c.lshape(), &|x| clipped_policy_loss(token_log_probs(x, &tok), &ot, &at, Some(&m), clip, r), 1e-6, 1e-7);
+    }
+    let lt = t64(lp.clone(), &c.sh).require_grad();
+    let g = lt.grad(&clipped_policy_loss(lt.clone(), &ot, &at, Some(&m), clip, TokenReduction::Sum).sum().backward()).unwrap().to_vec_f64();
+    for &i in &capped {
+        assert_eq!(g[i], 0.0, "capped token {i}");
+    }
+    // Per-sequence advantages take the same path.
+    let advs = rnd(c.sh[0] * c.sh[1], 1002, -2.0, 2.0);
+    let adv_tok: Vec<f64> = (0..c.n()).map(|i| advs[i / c.sh[2]]).collect();
+    let got = clipped_policy_loss(t64(lp.clone(), &c.sh), &ot, &t64(advs, &c.sh[..2]), Some(&m), clip, TokenReduction::None).to_vec_f64();
+    assert_close("dual clip per-sequence advantages", &got, &ppo_host_full(&lp, &old, &adv_tok, &c.mask, clip), 1e-13);
+    // The clip fraction counts capped tokens with the clipped ones.
+    let per = c.n() / c.sh[0];
+    let want: Vec<f64> = (0..c.sh[0])
+        .map(|s| {
+            let idx = s * per..(s + 1) * per;
+            let hit = idx.clone().filter(|&i| {
+                let r = (lp[i] - old[i]).exp();
+                c.mask[i] == 1.0 && ((adv[i] > 0.0 && r > 1.2) || (adv[i] < 0.0 && (r < 0.8 || r > 3.0)))
+            });
+            hit.count() as f64 / c.mask[idx].iter().sum::<f64>()
+        })
+        .collect();
+    assert_close("clip fraction with a dual clip", &clip_fraction(&t64(lp, &c.sh), &ot, &at, Some(&m), clip).to_vec_f64(), &want, 1e-15);
+}
+
+/// A = −1 with a log-ratio of 100: without bounds the f32 loss is +∞; the default log-ratio
+/// clamp gives exp(20), and with a dual clip 3 the loss is 3, both with zero gradient; a dual clip
+/// without the log-ratio clamp gives 3 with a NaN gradient (the ratio itself overflowed); the
+/// clip fraction counts the clamped token.
+#[test]
+fn clipped_policy_loss_overflow_guards() {
+    let lp = t32(vec![-0.5, -1.0], &[1, 1, 2]);
+    let old = t32(vec![-100.5, -1.0], &[1, 1, 2]);
+    let adv = t32(vec![-1.0, 1.0], &[1, 1, 2]);
+    let run = |clip: Clip| {
+        let x = lp.clone().require_grad();
+        let l = clipped_policy_loss(x.clone(), &old, &adv, None, clip, TokenReduction::None);
+        let g = x.grad(&l.clone().slice([0..1, 0..1, 0..1]).sum().backward()).unwrap().to_vec_f64();
+        (l.to_vec_f64(), g[0])
+    };
+    let (open, _) = run(Clip::symmetric(0.2).with_log_ratio_clamp(None));
+    assert_eq!(open[0], f64::INFINITY);
+    let (clamped, g) = run(Clip::symmetric(0.2));
+    assert_close("log-ratio clamp", &clamped[..1], &[(LOG_RATIO_CLAMP as f32).exp() as f64], 1e-7);
+    assert_eq!(g, 0.0);
+    let (dual, g) = run(Clip::symmetric(0.2).with_dual(3.0));
+    assert_eq!((dual[0], g), (3.0, 0.0));
+    // The dual clip alone bounds the value, not an overflowed ratio's gradient (0 · ∞ in the
+    // unselected branch): keep the log-ratio clamp on.
+    let (dual, g) = run(Clip::symmetric(0.2).with_dual(3.0).with_log_ratio_clamp(None));
+    assert!(dual[0] == 3.0 && g.is_nan(), "{dual:?} {g}");
+    assert_eq!(clamped[1], -1.0, "an on-policy token: −A·r with r = 1");
+    let f = clip_fraction(&lp, &old, &adv, None, Clip::symmetric(0.2)).to_vec_f64();
+    assert_eq!(f, vec![0.5]);
+}
+
+/// k3 at δ = 100: unbounded it is +∞ in f32; with `KL_DELTA_CLAMP` it is exp(20) − 21 with zero
+/// gradient; a clamp that is not active changes nothing, to the bit.
+#[test]
+fn kl_estimate_delta_clamp() {
+    let lp = t32(vec![-100.5, -1.0], &[1, 1, 2]);
+    let lr = t32(vec![-0.5, -1.2], &[1, 1, 2]);
+    let open = kl_estimate(lp.clone(), &lr, KlEstimator::K3, None, None, TokenReduction::None).to_vec_f64();
+    assert_eq!(open[0], f64::INFINITY);
+    let x = lp.clone().require_grad();
+    let k = kl_estimate(x.clone(), &lr, KlEstimator::K3, Some(KL_DELTA_CLAMP), None, TokenReduction::None);
+    let kv = k.to_vec_f64();
+    let want = (20.0f32).exp() as f64 - 21.0;
+    assert!((kv[0] - want).abs() <= 1e-7 * want, "{} vs {want}", kv[0]);
+    assert_eq!(kv[1], open[1]);
+    let g = x.grad(&k.sum().backward()).unwrap().to_vec_f64();
+    assert_eq!(g[0], 0.0);
+    assert!(g[1] != 0.0);
+}
+
+/// Logits with an additive −1e9 (the decoder's grammar-mask fill) give the same log-probabilities
+/// of allowed tokens, KL, entropy and gradients as −∞, to the bit, in f32 and f64. A mask on the
+/// reference only gives a KL of +∞ with −∞ and about 1e9·π with −1e9.
+#[test]
+fn additive_mask_minus_1e9_matches_minus_infinity() {
+    let c = case(1010, -4.0, 4.0);
+    let refl = rnd(c.n() * c.v, 1011, -4.0, 4.0);
+    let v = c.v;
+    // Exclude vocabulary entry 3 (never a token here), and nothing else.
+    let tokens: Vec<i64> = c.tokens.iter().map(|t| if *t == 3 { 1 } else { *t }).collect();
+    let tok = IntTensor::from_data(tokens, c.sh);
+    for dtype in [DType::F32, DType::F64] {
+        let vm = |fill: f64| Tensor::from_f64s((0..v).map(|k| if k == 3 { fill } else { 0.0 }).collect(), vec![1, 1, 1, v], dtype);
+        let m = c.mask(dtype);
+        let run = |fill: f64| -> Vec<Vec<f64>> {
+            let mask = vm(fill);
+            let mut out = Vec::new();
+            for which in 0..3 {
+                let x = Tensor::from_f64s(c.logits.clone(), c.lshape(), dtype).require_grad();
+                let z = tempered_logits(x.clone(), 0.8, Some(&mask));
+                let l = match which {
+                    0 => token_log_probs(z, &tok),
+                    1 => reference_kl(x.clone(), &Tensor::from_f64s(refl.clone(), c.lshape(), dtype), 0.8, Some(&mask), Some(&m), TokenReduction::None),
+                    _ => categorical_entropy(z, Some(&m), TokenReduction::None),
+                };
+                let g = x.grad(&l.clone().sum().backward()).unwrap().to_vec_f64();
+                out.push(l.to_vec_f64());
+                out.push(g);
+            }
+            out
+        };
+        let (a, b) = (run(-1e9), run(f64::NEG_INFINITY));
+        for (i, (x, y)) in a.iter().zip(&b).enumerate() {
+            assert!(x.iter().all(|v| v.is_finite()), "{dtype:?} output {i} under −1e9");
+            assert_eq!(x, y, "{dtype:?} output {i}: −1e9 vs −∞");
+        }
+        // The mask on one side only.
+        let one = Tensor::from_f64s(vec![0.0, 0.5, 1.0], vec![1, 1, 1, 3], dtype);
+        let kl_with = |fill: f64| categorical_kl(one.clone(), &(one.clone() + Tensor::from_f64s(vec![0.0, 0.0, fill], vec![1, 1, 1, 3], dtype)), None, TokenReduction::Sum).to_vec_f64()[0];
+        assert_eq!(kl_with(f64::NEG_INFINITY), f64::INFINITY);
+        let p2 = log_softmax_host(&[0.0, 0.5, 1.0], 3)[2].exp();
+        assert!((kl_with(-1e9) / (1e9 * p2) - 1.0).abs() < 1e-6, "{dtype:?}: {} vs about {}", kl_with(-1e9), 1e9 * p2);
+    }
+}
+
+/// `reference_kl` is `categorical_kl` of the two `tempered_logits` (same τ, same mask), to the
+/// bit, and `categorical_kl` itself at τ = 1 without a mask; for a reference equal to the policy
+/// it is 0, while mixing temperatures (the policy at τ, the reference at 1) is not.
+#[test]
+fn reference_kl_uses_the_sampling_temperature_on_both_sides() {
+    let c = case(1020, -4.0, 4.0);
+    let refl = t64(rnd(c.n() * c.v, 1021, -4.0, 4.0), &c.lshape());
+    let x = t64(c.logits.clone(), &c.lshape());
+    let vm = t64((0..c.v).map(|k| if k == 2 { f64::NEG_INFINITY } else { 0.0 }).collect(), &[1, 1, 1, c.v]);
+    let m = c.mask(DType::F64);
+    for tau in [0.6, 1.0, 1.7] {
+        let got = reference_kl(x.clone(), &refl, tau, Some(&vm), Some(&m), TokenReduction::TokenMean).to_vec_f64();
+        let want = categorical_kl(tempered_logits(x.clone(), tau, Some(&vm)), &tempered_logits(refl.clone(), tau, Some(&vm)), Some(&m), TokenReduction::TokenMean).to_vec_f64();
+        assert_eq!(got, want, "τ {tau}");
+    }
+    assert_eq!(reference_kl(x.clone(), &refl, 1.0, None, None, TokenReduction::None).to_vec_f64(), categorical_kl(x.clone(), &refl, None, TokenReduction::None).to_vec_f64());
+    let same = reference_kl(x.clone(), &x, 0.6, Some(&vm), None, TokenReduction::None).to_vec_f64();
+    assert!(same.iter().all(|k| k.abs() < 1e-15), "a reference equal to the policy");
+    let mixed = categorical_kl(tempered_logits(x.clone(), 0.6, Some(&vm)), &tempered_logits(x.clone(), 1.0, Some(&vm)), None, TokenReduction::None).to_vec_f64();
+    assert!(mixed.iter().all(|k| *k > 1e-3), "mixed temperatures bias the penalty: {mixed:?}");
+}
+
+/// `check_scored_finite`: finite scored values pass; a −∞ at a scored position is named; one at a
+/// masked position passes.
+#[test]
+fn scored_log_probs_must_be_finite() {
+    let lp = t32(vec![-1.0, f64::NEG_INFINITY, -2.0], &[1, 1, 3]);
+    let e = check_scored_finite("test", &lp, None).unwrap_err();
+    assert!(e.contains("position 1"), "{e}");
+    assert!(check_scored_finite("test", &lp, Some(&t32(vec![1.0, 0.0, 1.0], &[1, 1, 3]))).is_ok());
+    assert!(check_scored_finite("test", &t32(vec![-1.0, -3.0, -2.0], &[1, 1, 3]), None).is_ok());
+}
+
+/// Debug builds refuse a scored log-probability of −∞ in the losses.
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "not finite")]
+fn losses_refuse_non_finite_scored_log_probs_in_debug_builds() {
+    let lp = t32(vec![-1.0, f64::NEG_INFINITY], &[1, 1, 2]);
+    let _ = policy_gradient_loss(lp, &t32(vec![1.0], &[1, 1]), None, TokenReduction::Sum);
 }

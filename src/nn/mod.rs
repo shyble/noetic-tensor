@@ -53,7 +53,7 @@ pub use module::{Module, ModuleT};
 pub use norm::{l2_normalize, layer_norm, rms_norm, rms_normalize, LayerNorm, RmsNorm, L2_EPS};
 pub use optim::{Optimizer, ParamGroups, ParamOptions};
 pub use rank::{covariance, effective_rank, effective_rank_of, effective_rank_of_covariance, effective_rank_of_singular, effective_rank_singular, embedding_stats, jacobi, jacobi_eigenvalues, singular_values, EmbeddingStats, Jacobi};
-pub use rl::{categorical_entropy, categorical_kl, clip_fraction, clipped_policy_loss, group_advantages, group_advantages_tensor, kl_estimate, policy_gradient_loss, sample_categorical, tempered_logits, token_log_probs, Clip, GroupNorm, KlEstimator, TokenReduction};
+pub use rl::{categorical_entropy, categorical_kl, check_scored_finite, clip_fraction, clipped_policy_loss, group_advantages, group_advantages_tensor, kl_estimate, policy_gradient_loss, reference_kl, sample_categorical, tempered_logits, token_log_probs, Clip, GroupNorm, KlEstimator, TokenReduction, KL_DELTA_CLAMP, LOG_RATIO_CLAMP};
 pub use rotary::{Rope, RopeConfig, RopeStyle};
 pub use schedule::{Constant, LinearWarmup, Schedule, StepDecay, WarmupCosine};
 pub use sgd::{Sgd, SgdConfig};

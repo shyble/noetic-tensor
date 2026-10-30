@@ -15,7 +15,17 @@
 //!
 //! Logits may hold −∞ (a token excluded by an additive mask, see `tempered_logits`): the
 //! log-probabilities, the KL and the entropy give a token of probability exactly 0 a zero term
-//! and a zero gradient instead of `0 · (−∞)`.
+//! and a zero gradient instead of `0 · (−∞)`. An additive −1e9 (the decoder's grammar-mask
+//! fill) gives the same values: its probability underflows to exactly 0.
+//!
+//! One masking convention for the caller: build the logits of every distribution that enters a
+//! loss with `tempered_logits` — the sampling temperature and the same vocabulary mask (−∞ or
+//! −1e9 for disallowed tokens) — for sampling, for the policy's log-probabilities in training,
+//! for the old log-probabilities and for the reference. A mask applied to the policy but not to
+//! the reference makes the KL +∞ wherever π > 0 and π_ref = 0 (or about 1e9 with −1e9); a
+//! sampling mask missing from the training logits leaves the ratio and the log-probabilities
+//! inconsistent. Debug builds check that every scored log-probability is finite
+//! (`check_scored_finite`).
 
 use crate::tensor::{log_softmax, BoolTensor, IntTensor, Tensor};
 use rand::RngCore;
@@ -37,7 +47,10 @@ pub enum TokenReduction {
     /// sequence with no scored position gives 0).
     PerSequence,
     /// The per-seed mean of `PerSequence` over the sequences with at least one scored position,
-    /// `[S]` (each sequence counts once, whatever its length; 0 if there is none).
+    /// `[S]` (each sequence counts once, whatever its length; 0 if there is none). This carries a
+    /// length bias: a token of a short sequence weighs more than one of a long sequence, so with
+    /// a negative advantage a long response is penalised less per token than a short one.
+    /// `TokenMean` weighs every scored token equally.
     SequenceMean,
 }
 
@@ -127,86 +140,189 @@ pub fn token_log_probs(logits: Tensor, tokens: &IntTensor) -> Tensor {
     logp.gather(r - 1, tokens.clone().unsqueeze_dim(r - 1)).reshape_dyn(out)
 }
 
+/// The default bound on the log-ratio `logp − old_logp` in `clipped_policy_loss`
+/// (`Clip::new`'s): `exp(20)` ≈ 4.9e8 is finite in f32, and a ratio that far out is clipped (A > 0)
+/// or, for A < 0 without a dual clip, would otherwise reach +∞.
+pub const LOG_RATIO_CLAMP: f64 = 20.0;
+
+/// The recommended bound on δ in `kl_estimate` (`Some(KL_DELTA_CLAMP)`): `exp(20)` is finite
+/// in f32.
+pub const KL_DELTA_CLAMP: f64 = 20.0;
+
+/// The clip settings of `clipped_policy_loss`: the ratio is clipped to `[1 − low, 1 + high]`;
+/// `dual` (c > 1) caps the loss of a negative-advantage token at `−c·A` (dual-clip PPO; `None`
+/// by default); `log_ratio_clamp` bounds `logp − old_logp` to `[−b, b]` before the exponential
+/// (`Some(LOG_RATIO_CLAMP)` by default; `None` for the unbounded ratio). Where a bound is active
+/// the token gets no gradient. The dual clip bounds the loss's value, not the ratio: with the
+/// log-ratio clamp off, a ratio that overflows to +∞ leaves a dual-capped token's value finite
+/// but its gradient NaN (zero upstream times the exponential's infinite derivative), so keep the
+/// clamp on.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Clip {
+    pub low: f64,
+    pub high: f64,
+    pub dual: Option<f64>,
+    pub log_ratio_clamp: Option<f64>,
+}
+
+impl Clip {
+    /// `[1 − low, 1 + high]`, no dual clip, the log-ratio bounded by `LOG_RATIO_CLAMP`.
+    pub fn new(low: f64, high: f64) -> Clip {
+        Clip { low, high, dual: None, log_ratio_clamp: Some(LOG_RATIO_CLAMP) }
+    }
+
+    /// `[1 − ε, 1 + ε]`, PPO's, with `new`'s defaults.
+    pub fn symmetric(eps: f64) -> Clip {
+        Clip::new(eps, eps)
+    }
+
+    /// With a dual clip c > 1: a token with A < 0 loses at most `−c·A`.
+    pub fn with_dual(self, c: f64) -> Clip {
+        Clip { dual: Some(c), ..self }
+    }
+
+    /// With another log-ratio bound (`None`: unbounded).
+    pub fn with_log_ratio_clamp(self, b: Option<f64>) -> Clip {
+        Clip { log_ratio_clamp: b, ..self }
+    }
+
+    fn check(self) {
+        assert!(self.low >= 0.0 && self.low < 1.0 && self.high >= 0.0 && self.low.is_finite() && self.high.is_finite(), "clip range [1 − {}, 1 + {}] (need 0 ≤ low < 1, 0 ≤ high)", self.low, self.high);
+        if let Some(c) = self.dual {
+            assert!(c > 1.0 && c.is_finite(), "dual clip {c} (need c > 1)");
+        }
+        if let Some(b) = self.log_ratio_clamp {
+            assert!(b > 0.0, "log-ratio clamp {b} (need b > 0)");
+        }
+    }
+}
+
+/// Every scored log-probability (mask ≠ 0) is finite: the check the losses run in debug builds
+/// (a host read); release builds do not. A −∞ there means a scored token the distribution
+/// excludes (a sampling mask not applied to the training logits, or a token from elsewhere); the
+/// error names the first such position.
+pub fn check_scored_finite(what: &str, logp: &Tensor, mask: Option<&Tensor>) -> std::result::Result<(), String> {
+    let v = logp.to_vec_f64();
+    let m = mask.map(|m| m.to_vec_f64());
+    match (0..v.len()).find(|&i| m.as_ref().is_none_or(|m| m[i] != 0.0) && !v[i].is_finite()) {
+        Some(i) => Err(format!("{what}: the scored log-probability at flat position {i} is {} (not finite)", v[i])),
+        None => Ok(()),
+    }
+}
+
+#[cfg(debug_assertions)]
+fn debug_check(what: &str, logp: &Tensor, mask: Option<&Tensor>) {
+    if let Err(e) = check_scored_finite(what, logp, mask) {
+        panic!("{e}");
+    }
+}
+
+#[cfg(not(debug_assertions))]
+fn debug_check(_: &str, _: &Tensor, _: Option<&Tensor>) {}
+
 /// The policy-gradient (REINFORCE) loss with signed weights, `l = −w · log π(token)` per scored
 /// token: `logp` `[S, B, T]` (from `token_log_probs`), `weights` the advantages or rewards per
 /// token `[S, B, T]` or per sequence `[S, B]` (detached; any sign). Minimising it raises the
 /// log-probability of positively weighted tokens and lowers that of negatively weighted ones.
+/// Debug builds check that the scored log-probabilities are finite (`check_scored_finite`).
 pub fn policy_gradient_loss(logp: Tensor, weights: &Tensor, mask: Option<&Tensor>, reduction: TokenReduction) -> Tensor {
     assert_eq!(logp.rank(), 3, "policy_gradient_loss: logp [S, B, T]");
+    debug_check("policy_gradient_loss", &logp, mask);
     let m = mask_or_ones(mask, &logp);
     let w = token_weights(weights, &logp, "policy_gradient_loss");
     let per = zero_masked(-(logp * w), &m);
     reduce_tokens(per, &m, reduction)
 }
 
-/// The clip range of `clipped_policy_loss`: the ratio is clipped to `[1 − low, 1 + high]`.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Clip {
-    pub low: f64,
-    pub high: f64,
-}
-
-impl Clip {
-    /// `[1 − ε, 1 + ε]`, PPO's.
-    pub fn symmetric(eps: f64) -> Clip {
-        Clip { low: eps, high: eps }
-    }
-
-    fn check(self) {
-        assert!(self.low >= 0.0 && self.low < 1.0 && self.high >= 0.0 && self.low.is_finite() && self.high.is_finite(), "clip range [1 − {}, 1 + {}] (need 0 ≤ low < 1, 0 ≤ high)", self.low, self.high);
-    }
-}
-
-/// The ratio `exp(logp − old)` with the difference zeroed at masked positions before the
-/// exponential (so arbitrary old values at padding cannot overflow).
-fn ratio(logp: Tensor, old_logp: &Tensor, m: &Tensor) -> Tensor {
+/// The log-ratio `logp − old`, zeroed at masked positions (so arbitrary old values at padding
+/// cannot overflow) and bounded by `clamp`.
+fn log_ratio(logp: Tensor, old_logp: &Tensor, m: &Tensor, clamp: Option<f64>) -> Tensor {
     assert_eq!(old_logp.shape(), logp.shape(), "rl: old log-probabilities shape");
-    zero_masked(logp - old_logp.clone().detach(), m).exp()
+    let d = zero_masked(logp - old_logp.clone().detach(), m);
+    match clamp {
+        Some(b) => d.clamp(-b, b),
+        None => d,
+    }
 }
 
-/// PPO's clipped surrogate as a loss, per scored token: with `r = exp(logp − old_logp)`,
-/// `l = −min(r·A, clip(r, 1 − low, 1 + high)·A)`, computed as `max(−r·A, −clip(r)·A)` by a
-/// select (the gradient goes to the active branch; the clipped branch's is zero outside the
-/// range). `old_logp` `[S, B, T]` are the sampling policy's log-probabilities of the same tokens
-/// and `advantages` `[S, B, T]` or `[S, B]`; both are detached. At `logp == old_logp` the
-/// gradient equals `policy_gradient_loss`'s with the advantages as weights.
+/// Per token: `t` where `pick` is true, else `f` (a select; the gradient goes to the chosen one).
+fn select(pick: BoolTensor, t: Tensor, f: Tensor) -> Tensor {
+    let not = pick.clone().bool_not();
+    t.mask_fill(not, 0.0) + f.mask_fill(pick, 0.0)
+}
+
+/// PPO's clipped surrogate as a loss, per scored token: with `r = exp(logp − old_logp)` (the
+/// log-ratio bounded by `clip.log_ratio_clamp`), `l = −min(r·A, clip(r, 1 − low, 1 + high)·A)`,
+/// computed as `max(−r·A, −clip(r)·A)` by a select (the gradient goes to the active branch; the
+/// clipped branch's is zero outside the range); with a dual clip c, a token with A < 0 has
+/// `l = min(that, −c·A)`. `old_logp` `[S, B, T]` are the sampling policy's log-probabilities of
+/// the same tokens, under the same `tempered_logits` (temperature and mask) as `logp`, and
+/// `advantages` `[S, B, T]` or `[S, B]`; both are detached.
+///
+/// At `logp == old_logp` (on policy: the first update on a fresh batch) the gradient equals
+/// `policy_gradient_loss`'s with the advantages as weights; later epochs on the same batch are
+/// off policy, and the ratio corrects for that only within the clip range.
 pub fn clipped_policy_loss(logp: Tensor, old_logp: &Tensor, advantages: &Tensor, mask: Option<&Tensor>, clip: Clip, reduction: TokenReduction) -> Tensor {
     clip.check();
     assert_eq!(logp.rank(), 3, "clipped_policy_loss: logp [S, B, T]");
+    debug_check("clipped_policy_loss", &logp, mask);
+    debug_check("clipped_policy_loss (old log-probabilities)", old_logp, mask);
     let m = mask_or_ones(mask, &logp);
     let a = token_weights(advantages, &logp, "clipped_policy_loss");
-    let r = ratio(logp, old_logp, &m);
+    let r = log_ratio(logp, old_logp, &m, clip.log_ratio_clamp).exp();
     let unclipped = -(r.clone() * a.clone());
-    let clipped = -(r.clamp(1.0 - clip.low, 1.0 + clip.high) * a);
-    let per = zero_masked(select_max(unclipped, clipped), &m);
-    reduce_tokens(per, &m, reduction)
+    let clipped = -(r.clamp(1.0 - clip.low, 1.0 + clip.high) * a.clone());
+    let ppo = select_max(unclipped, clipped);
+    let per = match clip.dual {
+        None => ppo,
+        Some(c) => {
+            let [s, b, t] = ppo.dims();
+            let a = a.expand([s, b, t]);
+            let cap = a.clone().mul_scalar(-c); // −c·A, positive where A < 0
+            let capped = -select_max(-ppo.clone(), -cap); // min(ppo, −c·A)
+            select(a.untracked().lower_elem(0.0), capped, ppo)
+        }
+    };
+    reduce_tokens(zero_masked(per, &m), &m, reduction)
 }
 
-/// The fraction of scored tokens at which `clipped_policy_loss` takes its clipped branch with
-/// the ratio outside the range (the tokens that get no gradient), per seed `[S]`; untracked, for
-/// logging. A seed with no scored token gives 0.
+/// The fraction of scored tokens that `clipped_policy_loss` gives no gradient through a bound,
+/// per seed `[S]`: A > 0 with r > 1 + high, A < 0 with r < 1 − low, A < 0 with r > c under a
+/// dual clip, or the log-ratio beyond its clamp. Untracked, for logging; a seed with no scored
+/// token gives 0.
 pub fn clip_fraction(logp: &Tensor, old_logp: &Tensor, advantages: &Tensor, mask: Option<&Tensor>, clip: Clip) -> Tensor {
     clip.check();
     let logp = logp.clone().detach();
     let m = mask_or_ones(mask, &logp);
     let a = token_weights(advantages, &logp, "clip_fraction");
-    let r = ratio(logp, old_logp, &m);
+    let d = log_ratio(logp, old_logp, &m, None);
+    let r = d.clone().exp();
     let [s, b, t] = r.dims();
-    // Clipped and active: A > 0 with r > 1 + high, or A < 0 with r < 1 − low.
-    let up = r.clone().greater_elem(1.0 + clip.high).float_dtype(r.dtype()).to(r.device());
-    let down = r.lower_elem(1.0 - clip.low).float_dtype(m.dtype()).to(m.device());
-    let pos = a.clone().greater_elem(0.0).float_dtype(m.dtype()).to(m.device());
-    let neg = a.lower_elem(0.0).float_dtype(m.dtype()).to(m.device());
-    let hit = (up * pos + down * neg) * m.clone();
+    let (dt, dev) = (m.dtype(), m.device());
+    let f = |x: BoolTensor| x.float_dtype(dt).to(dev);
+    let pos = f(a.clone().greater_elem(0.0));
+    let neg = f(a.lower_elem(0.0));
+    let up = f(r.clone().greater_elem(1.0 + clip.high));
+    let down = f(r.clone().lower_elem(1.0 - clip.low));
+    let mut hit = up * pos + down * neg.clone();
+    if let Some(c) = clip.dual {
+        hit = hit + f(r.greater_elem(c)) * neg;
+    }
+    if let Some(bound) = clip.log_ratio_clamp {
+        hit = hit + f(d.abs().greater_elem(bound));
+    }
+    let hit = hit.clamp_max(1.0) * m.clone();
     let count = m.reshape([s, b * t]).sum_dim(1).clamp_min(1.0).reshape([s]);
     hit.reshape([s, b * t]).sum_dim(1).reshape([s]) / count
 }
 
 /// The exact KL divergence `KL(π ‖ π_ref) = Σ_v π_v (log π_v − log π_ref,v)` per position, with
 /// π = softmax(logits) and π_ref = softmax(ref_logits) along the last axis (`[S, B, T, V]`; the
-/// reference detached): the reverse KL used as a penalty toward a frozen reference. A token with
-/// π_v = 0 (logit −∞) contributes 0; one with π_v > 0 and π_ref,v = 0 makes the KL +∞. The
-/// gradient is that of the exact KL (no sampling). Compare `nn::kl_div`, the forward KL
+/// reference detached): the reverse KL used as a penalty toward a frozen reference, and the
+/// recommended default penalty (exact, no sampling noise, valid on and off policy; its cost is
+/// one pass over V per position). A token with π_v = 0 (logit −∞, or an additive −1e9 that
+/// underflows) contributes 0; one with π_v > 0 and π_ref,v = 0 makes the KL +∞, so apply the same
+/// vocabulary mask to both sides (`reference_kl` does). Compare `nn::kl_div`, the forward KL
 /// `KL(target ‖ pred)` with both inputs differentiable.
 pub fn categorical_kl(logits: Tensor, ref_logits: &Tensor, mask: Option<&Tensor>, reduction: TokenReduction) -> Tensor {
     assert_eq!(logits.rank(), 4, "categorical_kl: logits [S, B, T, V]");
@@ -219,6 +335,19 @@ pub fn categorical_kl(logits: Tensor, ref_logits: &Tensor, mask: Option<&Tensor>
     let per = (logp.exp() * diff).sum_dim(3).reshape([s, b, t]);
     let m = mask_or_ones(mask, &per);
     reduce_tokens(zero_masked(per, &m), &m, reduction)
+}
+
+/// The reference penalty under the engine's convention: `categorical_kl` between the policy and
+/// the reference **at the sampling temperature, with the same vocabulary mask, on both sides**:
+/// `KL(softmax(l/τ + mask) ‖ softmax(l_ref/τ + mask))`, i.e. between the distributions the
+/// sampler draws from (`tempered_logits`). Mixing temperatures (τ on one side, 1 on the other)
+/// biases the penalty, and a mask on one side only makes it +∞; the per-token estimators take
+/// their `ref_logp` the same way (`token_log_probs(tempered_logits(ref_logits, τ, mask), tokens)`).
+/// At τ = 1 without a mask this is `categorical_kl`, to the bit.
+pub fn reference_kl(logits: Tensor, ref_logits: &Tensor, temperature: f64, vocab_mask: Option<&Tensor>, mask: Option<&Tensor>, reduction: TokenReduction) -> Tensor {
+    let p = tempered_logits(logits, temperature, vocab_mask);
+    let r = tempered_logits(ref_logits.clone().detach(), temperature, vocab_mask);
+    categorical_kl(p, &r, mask, reduction)
 }
 
 /// The per-sampled-token estimators of `KL(π ‖ π_ref)` (Schulman's k1, k2, k3), from the
@@ -236,22 +365,32 @@ pub enum KlEstimator {
 
 /// A per-sampled-token estimate of `KL(π ‖ π_ref)`: `logp` `[S, B, T]` the sampled tokens'
 /// log-probabilities under the current policy (tracked) and `ref_logp` under the reference
-/// (detached), on tokens sampled from π. δ is zeroed at masked positions before the exponential.
+/// (detached), both under the same `tempered_logits` (see `reference_kl`). δ is zeroed at masked
+/// positions before the exponential and, with `delta_clamp = Some(b)`, bounded to `[−b, b]` (no
+/// gradient where the bound is active); `Some(KL_DELTA_CLAMP)` is the recommended setting, `None`
+/// leaves δ unbounded (k3's `exp(δ)` then overflows to +∞ for δ above about 88 in f32).
 ///
-/// The value's expectation under samples from π is the KL for k1 and k3 (k2 is biased). As a
-/// loss term its per-sample gradient, on policy, is in expectation: zero for k1; the gradient of
-/// `KL(π ‖ π_ref)` for k2; and the gradient of the forward `KL(π_ref ‖ π)` for k3 (the form used
-/// in the loss by GRPO-style trainers), not of the reverse KL. For the exact reverse-KL gradient
-/// use `categorical_kl` or k2.
-///
-/// No clamp is applied: k3's `exp(δ)` overflows to +∞ where the reference gives a sampled token
-/// far more probability than the policy (δ above about 88 in f32); clamp δ upstream, or use k2,
-/// if that can happen.
-pub fn kl_estimate(logp: Tensor, ref_logp: &Tensor, estimator: KlEstimator, mask: Option<&Tensor>, reduction: TokenReduction) -> Tensor {
+/// These statements hold **on policy**, for tokens sampled from the current π (the first update
+/// on a fresh batch): the value's expectation is the KL for k1 and k3 (k2 is biased); as a loss
+/// term the expected per-sample gradient is zero for k1, the gradient of `KL(π ‖ π_ref)` for k2,
+/// and the gradient of the forward `KL(π_ref ‖ π)` for k3 (the form GRPO-style trainers put in
+/// the loss), not of the reverse KL. After the first PPO epoch the tokens come from an older
+/// policy and none of them holds without importance weights. `categorical_kl` (`reference_kl`)
+/// is exact on and off policy and is the recommended default penalty.
+pub fn kl_estimate(logp: Tensor, ref_logp: &Tensor, estimator: KlEstimator, delta_clamp: Option<f64>, mask: Option<&Tensor>, reduction: TokenReduction) -> Tensor {
     assert_eq!(logp.rank(), 3, "kl_estimate: logp [S, B, T]");
     assert_eq!(logp.shape(), ref_logp.shape(), "kl_estimate: reference log-probabilities shape");
+    if let Some(b) = delta_clamp {
+        assert!(b > 0.0, "kl_estimate: δ clamp {b} (need b > 0)");
+    }
+    debug_check("kl_estimate", &logp, mask);
+    debug_check("kl_estimate (reference log-probabilities)", ref_logp, mask);
     let m = mask_or_ones(mask, &logp);
     let delta = zero_masked(ref_logp.clone().detach() - logp, &m);
+    let delta = match delta_clamp {
+        Some(b) => delta.clamp(-b, b),
+        None => delta,
+    };
     let per = match estimator {
         KlEstimator::K1 => -delta,
         KlEstimator::K2 => (delta.clone() * delta).div_scalar(2.0),
@@ -261,7 +400,8 @@ pub fn kl_estimate(logp: Tensor, ref_logp: &Tensor, estimator: KlEstimator, mask
 }
 
 /// The entropy of the categorical softmax(logits) per position, `H = −Σ_v π_v log π_v`, logits
-/// `[S, B, T, V]`; a token of probability 0 (logit −∞) contributes 0.
+/// `[S, B, T, V]`; a token of probability 0 (logit −∞, or an additive −1e9 that underflows)
+/// contributes 0.
 pub fn categorical_entropy(logits: Tensor, mask: Option<&Tensor>, reduction: TokenReduction) -> Tensor {
     assert_eq!(logits.rank(), 4, "categorical_entropy: logits [S, B, T, V]");
     let [s, b, t, _] = logits.dims();
@@ -285,7 +425,14 @@ pub enum GroupNorm {
 
 /// Group-relative advantages of rewards `[G, N]` (row-major; G groups of N samples of the same
 /// prompt), on the host in f64: each reward minus its group's mean, divided by the group's
-/// standard deviation plus ε with `GroupNorm::Std`. A group of equal rewards gives zeros.
+/// standard deviation plus ε with `GroupNorm::Std`. A group whose rewards are all equal (max ==
+/// min) gives exact zeros, whatever ε (the mean's rounding would otherwise leave ±1-size noise
+/// at ε = 0).
+///
+/// Dividing by the group's standard deviation weights groups unevenly: a group with one success
+/// in N gets larger advantages than a balanced one, so nearly solved and nearly failed prompts
+/// count more. For binary verifier rewards, `MeanOnly` with `TokenReduction::TokenMean` is the
+/// safer default.
 pub fn group_advantages(rewards: &[f64], n: usize, norm: GroupNorm) -> Vec<f64> {
     assert!(n >= 1 && rewards.len().is_multiple_of(n), "group_advantages: {} rewards in groups of {n}", rewards.len());
     if let GroupNorm::Std { eps, unbiased } = norm {
@@ -294,6 +441,11 @@ pub fn group_advantages(rewards: &[f64], n: usize, norm: GroupNorm) -> Vec<f64> 
     }
     let mut out = Vec::with_capacity(rewards.len());
     for g in rewards.chunks(n) {
+        let (lo, hi) = g.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), &r| (lo.min(r), hi.max(r)));
+        if lo == hi {
+            out.extend(std::iter::repeat_n(0.0, n));
+            continue;
+        }
         let mean = g.iter().sum::<f64>() / n as f64;
         let scale = match norm {
             GroupNorm::MeanOnly => 1.0,
@@ -303,10 +455,7 @@ pub fn group_advantages(rewards: &[f64], n: usize, norm: GroupNorm) -> Vec<f64> 
                 var.sqrt() + eps
             }
         };
-        out.extend(g.iter().map(|r| {
-            let c = r - mean;
-            if c == 0.0 { 0.0 } else { c / scale }
-        }));
+        out.extend(g.iter().map(|r| (r - mean) / scale));
     }
     out
 }

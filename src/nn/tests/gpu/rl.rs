@@ -1,5 +1,6 @@
 // `nn::rl` on the device: every loss's value and logit gradient against CpuRef (values within
-// 1e-5, gradients within 1e-4, |Δ|/(1+|ref|)) with ±1e4 and −∞ logits and masked positions,
+// 1e-5, gradients within 1e-4, |Δ|/(1+|ref|)) with ±1e4 and −∞ logits and masked positions (a dual-clipped
+// PPO and the reference KL under a −1e9 vocabulary mask among them),
 // masked positions with exactly zero gradient, byte-identical run to run; the sampler's tokens
 // against CpuRef's for the same stream and run to run; group advantages on device tensors.
 
@@ -74,15 +75,18 @@ fn losses_run(d: &Data, device: Device) -> Vec<(String, Vec<f32>)> {
     let m = t32(&d.mask, &SH);
     let (old, adv, lr, refl) = (t32(&d.old, &SH), t32(&d.adv, &SH), t32(&d.lr, &SH), t32(&d.refl, &lsh));
     let advs = t32(&d.adv[..SH[0] * SH[1]], &SH[..2]);
+    let vmask = t32(&(0..V).map(|k| if k % 5 == 4 { -1e9 } else { 0.0 }).collect::<Vec<_>>(), &[1, 1, 1, V]);
     let cases: Vec<(&str, Box<dyn Fn(Tensor) -> Tensor>)> = vec![
         ("token_log_probs", Box::new(|x| token_log_probs(x, &tok).mask_fill(m.clone().equal_elem(0.0), 0.0))),
         ("pg token-mean", Box::new(|x| policy_gradient_loss(token_log_probs(x, &tok), &adv, Some(&m), TokenReduction::TokenMean))),
         ("pg per-sequence weights, none", Box::new(|x| policy_gradient_loss(token_log_probs(x, &tok), &advs, Some(&m), TokenReduction::None))),
-        ("ppo sum", Box::new(|x| clipped_policy_loss(token_log_probs(x, &tok), &old, &adv, Some(&m), Clip { low: 0.2, high: 0.28 }, TokenReduction::Sum))),
+        ("ppo sum", Box::new(|x| clipped_policy_loss(token_log_probs(x, &tok), &old, &adv, Some(&m), Clip::new(0.2, 0.28), TokenReduction::Sum))),
         ("kl sequence-mean", Box::new(|x| categorical_kl(x, &refl, Some(&m), TokenReduction::SequenceMean))),
-        ("k1 per-sequence", Box::new(|x| kl_estimate(token_log_probs(x, &tok), &lr, KlEstimator::K1, Some(&m), TokenReduction::PerSequence))),
-        ("k2 per-sequence", Box::new(|x| kl_estimate(token_log_probs(x, &tok), &lr, KlEstimator::K2, Some(&m), TokenReduction::PerSequence))),
-        ("k3 per-sequence", Box::new(|x| kl_estimate(token_log_probs(x, &tok), &lr, KlEstimator::K3, Some(&m), TokenReduction::PerSequence))),
+        ("k1 per-sequence", Box::new(|x| kl_estimate(token_log_probs(x, &tok), &lr, KlEstimator::K1, None, Some(&m), TokenReduction::PerSequence))),
+        ("k2 per-sequence", Box::new(|x| kl_estimate(token_log_probs(x, &tok), &lr, KlEstimator::K2, None, Some(&m), TokenReduction::PerSequence))),
+        ("k3 per-sequence", Box::new(|x| kl_estimate(token_log_probs(x, &tok), &lr, KlEstimator::K3, Some(KL_DELTA_CLAMP), Some(&m), TokenReduction::PerSequence))),
+        ("ppo dual clip, no log-ratio clamp, token-mean", Box::new(|x| clipped_policy_loss(token_log_probs(x, &tok), &old, &adv, Some(&m), Clip::symmetric(0.2).with_dual(3.0).with_log_ratio_clamp(None), TokenReduction::TokenMean))),
+        ("reference kl τ 0.7 with a −1e9 vocabulary mask, token-mean", Box::new(|x| reference_kl(x, &refl, 0.7, Some(&vmask), Some(&m), TokenReduction::TokenMean))),
         ("entropy token-mean", Box::new(|x| categorical_entropy(x, Some(&m), TokenReduction::TokenMean))),
     ];
     let mut out = Vec::new();
