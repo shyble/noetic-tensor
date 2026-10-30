@@ -1,6 +1,8 @@
 # Changes
 
-## 0.7.0 (not yet released; branch rl-ops)
+## 0.7.0
+
+Released 30 October 2026.
 
 Policy-gradient building blocks (`nn::rl`), for post-training a sequence decoder whose samples are scored outside the engine; the rollout loop, the verifier and the reward design stay with the caller. A data-parallel rank's hello now says `engine=0.7.0`, so ranks of 0.6.x and 0.7.0 refuse each other before step 0, as for any engine version; the wire protocol stays 3.
 
